@@ -125,7 +125,7 @@ public:
         NEWLINE_ANY     = 128,  /* CR, LF, CRLF, VT, FF, NEL, LS, PS */
         BSR_ANYCRLF     = 256,  /* \R matches only CR, LF and CRLF (default: all Unicode line breaks) */
         DOLLAR_ENDONLY  = 512,  /* $ matches only at the very end, not before a newline that ends the subject */
-        UNICODE         = 1024  /* \d \w \s \b and [[:alpha:]] etc. use Unicode properties, like PCRE2_UCP / (*UCP); off by default */
+        UCP             = 1024  /* \d \w \s \b and [[:alpha:]] etc. use Unicode properties, like PCRE2_UCP / (*UCP); off by default */
     };
 
     CRegexpW();

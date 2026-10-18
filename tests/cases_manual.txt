@@ -256,7 +256,7 @@ m	abc$	abc\nd	0-3
 	^(\((?:[^()]|\g<1>)*\))$	(a(b)c)	0-7 0-7
 i	(a)\g<1>	aA	0-2 0-1
 
-# (*UCP) / UNICODE: \d \w \s \b and POSIX classes follow Unicode properties
+# (*UCP) / UCP: \d \w \s \b and POSIX classes follow Unicode properties
 	\d+	１２３	NOMATCH
 	(*UCP)\d+	１２３٤	0-4
 	(*UTF8)(*UCP)\d+	１２	0-2

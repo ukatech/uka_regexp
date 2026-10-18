@@ -405,7 +405,7 @@ static void TestUnicodeFlag()
         CHECK(!off.Match(L"１２あ", ctx));
     }
     {
-        CRegexpW on(L"\\d+\\w+", CRegexpW::UNICODE);
+        CRegexpW on(L"\\d+\\w+", CRegexpW::UCP);
         CHECK(on.Match(L"１２あ", ctx) && ctx.GetStart(0) == 0 && ctx.GetEnd(0) == 3);
     }
     {
@@ -413,7 +413,7 @@ static void TestUnicodeFlag()
         CHECK(!verb.Match(L"あxあ", ctx));
         CHECK(verb.Match(L"あ xあ", ctx));
     }
-    CHECK(Repl(L"\\s", CRegexpW::UNICODE | CRegexpW::GLOBAL, L"a　b c", L"_", L"a_b_c", 2));
+    CHECK(Repl(L"\\s", CRegexpW::UCP | CRegexpW::GLOBAL, L"a　b c", L"_", L"a_b_c", 2));
     CHECK(Repl(L"\\s", CRegexpW::GLOBAL, L"a　b c", L"_", L"a　b_c", 1));
     CHECK(Repl(L"a{,2}", CRegexpW::GLOBAL, L"aaa", L"-", L"---", 3));   // a{,2} is a{0,2}
 }

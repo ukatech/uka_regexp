@@ -307,7 +307,7 @@ struct Program {
     int bsrAnyCrlf;           /* \R only matches CR, LF and CRLF */
     int notEmpty;             /* 1: never return an empty match; 2: not an empty match at the search start */
     int dollarEndOnly;        /* $ only matches at the very end (DOLLAR_ENDONLY) */
-    int ucp;                  /* \d \w \s \b and POSIX classes use Unicode properties (UNICODE, (*UCP)) */
+    int ucp;                  /* \d \w \s \b and POSIX classes use Unicode properties (UCP, (*UCP)) */
     unsigned long limitMatch; /* (*LIMIT_MATCH=n), 0: none */
 
     Program() : ngroups(0), nloops(0), global(0), anchored(0), firstChar(-1),
