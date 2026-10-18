@@ -1,7 +1,7 @@
 # CLAUDE.md
 
-wchar_t 専用のバックトラック型正規表現エンジン。本体は `uka_regexp.h` + `uka_regexp.cpp` の 2 ファイルだけ（使い方・対応構文は README.md）。
-**方針: PCRE2（Perl 互換）に近づける。** 迷ったら PCRE2 の挙動に合わせ、意図的な差異は README の「PCRE2 と意図的に違う点」の表に載せる。
+wchar_t 専用のバックトラック型正規表現エンジン。本体は `uka_regexp.h` + `uka_regexp.cpp` の 2 ファイルだけ（対応構文の仕様書と入門は README.md、C++ の使い方・ビルド・テストは DEVELOPERS.md）。
+**方針: PCRE2（Perl 互換）に近づける。** 迷ったら PCRE2 の挙動に合わせ、意図的な差異は README の「PCRE2 との関係と意図的な違い」の表に載せる。構文や挙動を変えたら README の仕様書（と、入門の例に影響するならそちらも）、API を変えたら DEVELOPERS.md を更新する。
 
 ## 守ること
 - VC6 / 古い GCC でも通る C++98 に限る: STL・C++11・複雑なテンプレート不可、`for (int i…)` で変数を宣言しない（VC6 はスコープが漏れる）、`snprintf` や `long long` 不使用、クラス内 static const 初期化不可。

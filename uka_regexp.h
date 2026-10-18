@@ -16,7 +16,7 @@
  *     CRegexpString out;
  *     re.Replace(L"03-1234", L"$2-$1", out);           // out.c_str() == L"1234-03"
  *
- * See README.md for the supported syntax.
+ * See README.md for the supported syntax and DEVELOPERS.md for the API.
  */
 #ifndef UKA_REGEXP_H
 #define UKA_REGEXP_H
