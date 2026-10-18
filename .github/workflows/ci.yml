@@ -65,6 +65,8 @@ jobs:
           for seed in 1 2 3 4 5; do
             python3 tests/fuzz_gen.py "$seed" 3000 > fuzz.txt
             build/san/run_cases fuzz.txt > /dev/null
+            python3 tests/fuzz_gen.py "$seed" 3000 astral > fuzz.txt
+            build/san/run_cases fuzz.txt > /dev/null
           done
 
   # Perl との突き合わせ。既知の差分（tests/perl_known_diffs.txt）は Perl の版や Unicode の版で

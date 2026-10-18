@@ -134,7 +134,7 @@ make compare-perl    # Perl 5.30 以降があれば、tests/cases_perl.txt を P
 `.github/workflows/ci.yml` が push・プルリクエスト・手動実行で次を行います。
 
 - **build-test**: Linux（g++・clang++）と macOS（clang++）で、本体を `-std=c++98 -Wall -Wextra -pedantic -Werror` でビルドし、`make test` を実行
-- **sanitize**: 同じ 3 環境で `-fsanitize=address,undefined` を付けて `make test` と `fuzz_gen.py` のランダムパターンを実行（結果は比べず、クラッシュと未定義動作だけを見る）。手元でも `make test BUILD=build/san CXXFLAGS="-std=c++98 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"` で同じことができる
+- **sanitize**: 同じ 3 環境で `-fsanitize=address,undefined` を付けて `make test` と `fuzz_gen.py` のランダムパターン（補助平面の文字を混ぜた `astral` も）を実行（結果は比べず、クラッシュと未定義動作だけを見る）。手元でも `make test BUILD=build/san CXXFLAGS="-std=c++98 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"` で同じことができる
 - **compare-perl**: Ubuntu の Perl で `make compare-perl`。既知の差分は Perl や Unicode の版で変わりうるため、失敗しても全体は赤にしない
 
 Linux・macOS の `wchar_t` は 32 bit です。16 bit の確認は Windows で行ってください。
