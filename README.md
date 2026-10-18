@@ -8,6 +8,15 @@
 | 正規表現をこれから使ってみる | [正規表現入門](#正規表現入門) |
 | 使える構文を正確に調べる | [仕様書](#仕様書) |
 
+## 採用プロジェクト
+
+伺か（Ukagaka）まわりの次のプロジェクトで使われています。
+
+- [YAYA Tc606-6以降](https://github.com/YAYA-shiori/yaya-shiori)
+- [里々 Mc205-3以降](https://github.com/ukatech/satoriya-shiori)
+- [華和梨 9.0.0β4以降](https://github.com/ukatech/kawari)
+- [SSP 2.9.20以降](https://ssp.shillest.net/)
+
 ## 正規表現入門
 
 ### 正規表現とは
