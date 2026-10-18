@@ -97,6 +97,15 @@ private:
     UkaRegexpImpl::Work* m_work;
 };
 
+/*
+ * Resolver for subroutine calls to names the pattern does not define, such as (?&date).
+ * Called while compiling, once per undefined name; returns the pattern text of that subroutine
+ * (it may call further names) or 0 if the name is unknown, which is a syntax error.  The text must
+ * stay valid until the call returns; user is the pointer given to Compile().  The text becomes a
+ * named group appended to the pattern, so its groups are numbered after the pattern's own groups.
+ */
+typedef const wchar_t* (*CRegexpResolveProc)(const wchar_t* name, void* user);
+
 class CRegexpW {
 public:
     enum {
@@ -112,15 +121,18 @@ public:
         NEWLINE_CRLF    = 64,
         NEWLINE_ANYCRLF = 96,   /* CR, LF or CRLF */
         NEWLINE_ANY     = 128,  /* CR, LF, CRLF, VT, FF, NEL, LS, PS */
-        BSR_ANYCRLF     = 256   /* \R matches only CR, LF and CRLF (default: all Unicode line breaks) */
+        BSR_ANYCRLF     = 256,  /* \R matches only CR, LF and CRLF (default: all Unicode line breaks) */
+        DOLLAR_ENDONLY  = 512   /* $ matches only at the very end, not before a newline that ends the subject */
     };
 
     CRegexpW();
     explicit CRegexpW(const wchar_t* pattern, unsigned int flags = 0);   /* may throw CRegexpException */
+    CRegexpW(const wchar_t* pattern, unsigned int flags, CRegexpResolveProc resolver, void* user = 0);
     ~CRegexpW();
 
     /* Compile a pattern. Throws CRegexpException(ERR_SYNTAX) on failure; the object is left unchanged then. */
     void Compile(const wchar_t* pattern, unsigned int flags = 0);
+    void Compile(const wchar_t* pattern, unsigned int flags, CRegexpResolveProc resolver, void* user = 0);
     bool IsCompiled() const { return m_prog != 0; }
 
     int GetGroupCount() const;                        /* number of capture groups, group 0 not counted */

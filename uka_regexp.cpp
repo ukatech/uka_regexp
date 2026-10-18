@@ -268,10 +268,11 @@ struct Program {
     int newline;              /* NL_* newline convention */
     int bsrAnyCrlf;           /* \R only matches CR, LF and CRLF */
     int notEmpty;             /* 1: never return an empty match; 2: not an empty match at the search start */
+    int dollarEndOnly;        /* $ only matches at the very end (DOLLAR_ENDONLY) */
     unsigned long limitMatch; /* (*LIMIT_MATCH=n), 0: none */
 
     Program() : ngroups(0), nloops(0), global(0), anchored(0), firstChar(-1),
-                newline(0), bsrAnyCrlf(0), notEmpty(0), limitMatch(0) {}
+                newline(0), bsrAnyCrlf(0), notEmpty(0), dollarEndOnly(0), limitMatch(0) {}
 private:
     Program(const Program&);
     Program& operator=(const Program&);
@@ -287,8 +288,9 @@ private:
 static const Range kDigit[]  = { {'0', '9'} };
 static const Range kWord[]   = { {'0', '9'}, {'A', 'Z'}, {'_', '_'}, {'a', 'z'} };
 static const Range kSpace[]  = { {9, 13}, {32, 32} };
-static const Range kHSpace[] = { {9, 9}, {32, 32}, {0xA0, 0xA0}, {0x1680, 0x1680}, {0x2000, 0x200A},
-                                 {0x202F, 0x202F}, {0x205F, 0x205F}, {0x3000, 0x3000} };
+static const Range kHSpace[] = { {9, 9}, {32, 32}, {0xA0, 0xA0}, {0x1680, 0x1680}, {0x180E, 0x180E},
+                                 {0x2000, 0x200A}, {0x202F, 0x202F}, {0x205F, 0x205F}, {0x3000, 0x3000} };
+static const Range kVSpace[] = { {10, 13}, {0x85, 0x85}, {0x2028, 0x2029} };   /* \v: LF VT FF CR NEL LS PS */
 
 static const Range kAlpha[]  = { {'A', 'Z'}, {'a', 'z'} };
 static const Range kAlnum[]  = { {'0', '9'}, {'A', 'Z'}, {'a', 'z'} };
@@ -644,18 +646,22 @@ static bool EqAscii(const wchar_t* w, int n, const char* a)
 
 class Compiler {
 public:
-    Compiler(Program& prog, const wchar_t* pat, int len, unsigned int flags)
+    Compiler(Program& prog, const wchar_t* pat, int len, unsigned int flags,
+             CRegexpResolveProc resolver, void* resolverUser)
         : m_prog(prog), m_p(pat), m_len(len), m_pos(0), m_flags(flags & 31u),
-          m_counter(0), m_maxGroup(0), m_quote(0), m_depth(0), m_look(0)
+          m_counter(0), m_maxGroup(0), m_quote(0), m_depth(0), m_look(0),
+          m_initFlags(flags & 31u), m_resolver(resolver), m_resolverUser(resolverUser)
     {
         if (flags & 16u) prog.global = 1;
         prog.newline = (int)((flags >> 5) & 7u);
         if (prog.newline > NL_ANY) prog.newline = NL_LF;
         prog.bsrAnyCrlf = (flags & 256u) ? 1 : 0;
+        prog.dollarEndOnly = (flags & 512u) ? 1 : 0;
     }
     void Run();
 
 private:
+    void ResolveExternal();
     Compiler(const Compiler&);
     Compiler& operator=(const Compiler&);
 
@@ -755,6 +761,10 @@ private:
     int m_quote;        /* inside \Q..\E ('Q'), \U..\E ('U') or \L..\E ('L') */
     int m_depth;
     int m_look;         /* nesting depth of assertions */
+    unsigned int m_initFlags;
+    CRegexpResolveProc m_resolver;
+    void* m_resolverUser;
+    Vec<int> m_external;   /* group nodes made from the patterns the resolver returned */
     Vec<Node> m_nodes;
     Vec<int> m_callPatch;
     Vec<int> m_groupPc;
@@ -865,7 +875,8 @@ int Compiler::ParseAtom()
         return NewNode(N_ASSERT, (m_flags & F_M) ? OP_MBOL : OP_BOL);
     case '$':
         ++m_pos;
-        return NewNode(N_ASSERT, (m_flags & F_M) ? OP_MEOL : OP_EOL);
+        /* like PCRE: also before a newline that ends the subject, unless DOLLAR_ENDONLY */
+        return NewNode(N_ASSERT, (m_flags & F_M) ? OP_MEOL : (m_prog.dollarEndOnly ? OP_EOL : OP_EOSNL));
     case '\\':
         return ParseEscape();
     default:   /* includes a quantifier character with nothing to repeat, and '{' : taken literally */
@@ -1517,7 +1528,6 @@ bool Compiler::ReadCharEscape(Cp c, Cp& out)
     case 'n': out = 10; return true;
     case 'r': out = 13; return true;
     case 'f': out = 12; return true;
-    case 'v': out = 11; return true;
     case 'a': out = 7; return true;
     case 'e': out = 27; return true;
     case 'x':
@@ -1791,9 +1801,10 @@ int Compiler::ParseEscape()
     case 'R': return NewNode(N_BSR);
     case 'X': return NewNode(N_GRAPHEME);
     case 'C':
-    case 'V':
-        Error("\\C and \\V are not supported", m_pos - 2);
+        Error("\\C is not supported", m_pos - 2);
         return -1;
+    case 'v': return SetNode(kVSpace, ARRAY_COUNT(kVSpace), false);
+    case 'V': return SetNode(kVSpace, ARRAY_COUNT(kVSpace), true);
     case 'N': {
         Cp v;
         if (ReadUPlus(v)) return MakeLiteral(v);
@@ -1899,9 +1910,10 @@ int Compiler::ReadClassItem(ClassBuilder& cb, Cp& ch)
         return 1;
     }
     case 'b': ch = 8; return 0;
+    case 'v': AddSet(cb.esc, kVSpace, ARRAY_COUNT(kVSpace), false); return 1;
+    case 'V': AddSet(cb.esc, kVSpace, ARRAY_COUNT(kVSpace), true); return 1;
     case 'C':
-    case 'V':
-        Error("\\C and \\V are not supported", m_pos - 2);
+        Error("\\C is not supported", m_pos - 2);
         return 2;
     case 'R':
     case 'X':
@@ -1983,12 +1995,75 @@ int Compiler::ParseClass()
     }
 }
 
+/* Subroutine calls to names that the pattern does not define are resolved through the callback. */
+void Compiler::ResolveExternal()
+{
+    int guard = 0;
+    if (!m_resolver) return;   /* the calls stay unresolved and are reported by ResolveRef() */
+    for (;;) {
+        int i, found = -1, nameOff, num, g, body, savedLen, savedPos;
+        const wchar_t* text;
+        const wchar_t* savedP;
+        unsigned int savedFlags;
+        NameEnt ne;
+        for (i = 0; i < m_nodes.Size(); ++i) {
+            if (m_nodes[i].type == N_CALL && m_nodes[i].b != 0 && FindNamedGroup(m_nodes[i].b - 1) == 0) {
+                found = i;
+                break;
+            }
+        }
+        if (found < 0) return;
+        if (++guard > 256) Error("too many subroutines from the resolver", -1);
+        nameOff = m_nodes[found].b - 1;
+        text = m_resolver(m_prog.namePool.Data() + nameOff, m_resolverUser);
+        if (!text) Error("undefined subroutine (the resolver does not know the name)", m_nodes[found].pos);
+
+        num = ++m_maxGroup;   /* the subroutine becomes a named group after all other groups */
+        m_counter = m_maxGroup;
+        ne.off = nameOff;
+        ne.group = num;
+        m_prog.names.Push(ne);
+
+        savedP = m_p; savedLen = m_len; savedPos = m_pos; savedFlags = m_flags;
+        m_p = text;
+        m_len = WLen(text);
+        m_pos = 0;
+        m_flags = m_initFlags;
+        m_quote = 0;
+        m_depth = 0;
+        m_look = 0;
+        try {
+            body = ParseAlt(false);
+            if (m_pos < m_len) Error("unmatched )");
+        } catch (CRegexpException& e) {
+            char msg[96];
+            int k = 0, j = 0;
+            const wchar_t* nm = m_prog.namePool.Data() + nameOff;
+            const char* prefix = "in subroutine '";
+            while (prefix[k] && k < 40) { msg[k] = prefix[k]; ++k; }
+            while (nm[j] && j < 20 && k < 70) { msg[k++] = ((Cp)nm[j] < 128) ? (char)nm[j] : '?'; ++j; }
+            msg[k++] = '\'';
+            msg[k++] = ':';
+            msg[k++] = ' ';
+            for (j = 0; e.what()[j] && k < (int)sizeof(msg) - 1; ++j) msg[k++] = e.what()[j];
+            msg[k] = 0;
+            throw CRegexpException(CRegexpException::ERR_SYNTAX, -1, msg);
+        }
+        m_p = savedP; m_len = savedLen; m_pos = savedPos; m_flags = savedFlags;
+        g = NewNode(N_GROUP, num);
+        m_nodes[g].child = body;
+        m_nodes[g].pos = m_nodes[found].pos;
+        m_external.Push(g);
+    }
+}
+
 void Compiler::Run()
 {
     int root;
     ParseStartVerbs();
     root = ParseAlt(false);
     if (m_pos < m_len) Error("unmatched )");
+    ResolveExternal();
     m_prog.ngroups = m_maxGroup;
     {
         int i;
@@ -2005,6 +2080,10 @@ void Compiler::Run()
     Gen(root);
     Emit2(OP_CLOSE, 0);
     Emit(OP_MATCH);
+    {
+        int i;
+        for (i = 0; i < m_external.Size(); ++i) Gen(m_external[i]);   /* after MATCH: reachable by calls only */
+    }
     {
         int i;
         for (i = 0; i < m_callPatch.Size(); ++i) {
@@ -5588,17 +5667,28 @@ CRegexpW::CRegexpW() : m_prog(0), m_stepBase(1000000UL), m_stepPer(256UL) {}
 CRegexpW::CRegexpW(const wchar_t* pattern, unsigned int flags)
     : m_prog(0), m_stepBase(1000000UL), m_stepPer(256UL)
 {
-    Compile(pattern, flags);
+    Compile(pattern, flags, 0, 0);
+}
+
+CRegexpW::CRegexpW(const wchar_t* pattern, unsigned int flags, CRegexpResolveProc resolver, void* user)
+    : m_prog(0), m_stepBase(1000000UL), m_stepPer(256UL)
+{
+    Compile(pattern, flags, resolver, user);
 }
 
 CRegexpW::~CRegexpW() { delete m_prog; }
 
 void CRegexpW::Compile(const wchar_t* pattern, unsigned int flags)
 {
+    Compile(pattern, flags, 0, 0);
+}
+
+void CRegexpW::Compile(const wchar_t* pattern, unsigned int flags, CRegexpResolveProc resolver, void* user)
+{
     Program* prog = new Program;
     if (!prog) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
     try {
-        Compiler c(*prog, pattern, WLen(pattern), flags);
+        Compiler c(*prog, pattern, WLen(pattern), flags, resolver, user);
         c.Run();
     } catch (...) {
         delete prog;

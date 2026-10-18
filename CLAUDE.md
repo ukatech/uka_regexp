@@ -11,13 +11,14 @@ wchar_t 専用のバックトラック型正規表現エンジン。本体は `u
 ## 構造（uka_regexp.cpp の順）
 Vec/データ構造/文字集合 → `Compiler`（パーサ→構文木 `Node`→`Gen` で int コード）→ `Matcher`（`Run`: 明示スタックのバックトラック VM）→ Unicode 関数 → 生成テーブル → 公開 API。
 - `Matcher::st[]` に捕獲・ループカウンタ・\K・現在フレームを全部入れ、`BtEntry` スタックに undo を積む。再帰呼び出し（`OP_CALL`）は `st[]` のスナップショットを取り、`OP_CLOSE` で復元して戻る。
+- 定義の無い名前のサブルーチン呼び出しは `Compiler::ResolveExternal()` がコールバックでパターン文字列に解決し、グループとして `MATCH` の後ろに生成する（呼び出し専用）。
 - 制御動詞は `BT_VERB` エントリ。戻ってきたら `Run` が false を返し、`Search` が `m_verb` を見て開始位置を進める。
 - 末尾の `// ==== BEGIN GENERATED TABLES` 〜 `END` は `tools/gen_unicode_tables.py` が書き換える（`make unicode-tables`）。手で編集しない。新しい表を参照するときは、先頭の `extern` 宣言を足す。
 
 ## テスト（変更したら必ず）
-`make test` → `make compare-perl`（Perl 5.30+、既知の差分 44 件は `tests/perl_known_diffs.txt`。仕様変更で差分が増減したらそのファイルを意図的に更新）。
-大きな変更後は `tests/fuzz_gen.py` のランダムケースを Perl と比べ（Perl は否定先読み内の捕獲を外に漏らす・一部の最適化に不具合があるので、group 0 だけを見て原因を読む）、`-fsanitize=address,undefined` でも走らせること。
+`make test` → `make compare-perl`（Perl 5.30+、既知の差分 43 件は `tests/perl_known_diffs.txt`。仕様変更で差分が増減したらそのファイルを意図的に更新）。
+大きな変更後は `tests/fuzz_gen.py` のランダムケースを `tests/fuzz_compare.py` で Perl と比べ（Perl は否定先読み内の捕獲を外に漏らす・一部の最適化に不具合があるので、差分は原因を読んで判断する）、`-fsanitize=address,undefined` でも走らせること。
 `-std=c++98 -Wall -Wextra -pedantic` で g++ と clang の警告ゼロを保つ。16bit wchar_t は `-fshort-wchar` で確認できる。
 
-## 仕様上の決め事（変えると互換が崩れる。元の要件で決まっていたもの）
-`$` は末尾のみ（`\Z` が末尾改行の手前）／行区切りは既定で LF のみ／`\d\w\s\b` は ASCII／`\v` は垂直タブ文字／IGNORECASE は Unicode 単純 case folding／同名グループは同番号／`\g<name>` は参照（呼び出しではない）／後読みは短い候補から／上限超過は `ERR_STEP_LIMIT`。
+## 仕様上の決め事（変えると互換が崩れる。PCRE2 と違う点は元の要件で決まっていたもの）
+行区切りは既定で LF のみ／`\d\w\s\b` は ASCII／IGNORECASE は Unicode 単純 case folding／同名グループは同番号／`\g<name>` は参照（呼び出しではない）／後読みは短い候補から／上限超過は `ERR_STEP_LIMIT`。

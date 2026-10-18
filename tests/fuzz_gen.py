@@ -30,7 +30,7 @@ class Gen:
         if r < 0.75:
             return rnd.choice(["\\w", "\\W", "\\d", "\\s", "\\D", "\\S", "\\N", "\\R", "\\h", "\\H"])
         if r < 0.80:
-            return rnd.choice(["\\b", "\\B", "\\A", "\\z", "^"] + (["$"] if self.multiline else []))
+            return rnd.choice(["\\b", "\\B", "\\A", "\\z", "\\Z", "^", "$", "\\v", "\\V"])
         return rnd.choice("abc")
 
     def quant(self):
@@ -95,9 +95,7 @@ class Gen:
 
 def subject(multiline):
     n = rnd.choice([0, 1, 2, 3, 4, 5, 6, 7, 8])
-    alphabet = "aabbc 1A"
-    if multiline:
-        alphabet += "\n\n"
+    alphabet = "aabbc 1A\n"
     s = "".join(rnd.choice(alphabet) for _ in range(n))
     return s.replace("\n", "\\n")
 

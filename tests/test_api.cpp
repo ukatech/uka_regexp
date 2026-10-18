@@ -144,6 +144,88 @@ static void TestNewlineFlags()
     CHECK(CRegexpW(L"\\R", CRegexpW::BSR_ANYCRLF).Match(L"a\r\nb", ctx) && ctx.GetEnd(0) == 3);
 }
 
+struct ResolveLog { int calls; };
+
+static const wchar_t* TestResolver(const wchar_t* name, void* user)
+{
+    ((ResolveLog*)user)->calls++;
+    if (wcscmp(name, L"d4") == 0) return L"\\d{4}";
+    if (wcscmp(name, L"d2") == 0) return L"\\d\\d";
+    if (wcscmp(name, L"date") == 0) return L"(?&d4)-(?&d2)-(?&d2)";
+    if (wcscmp(name, L"paren") == 0) return L"\\((?:[^()]++|(?&paren))*\\)";
+    if (wcscmp(name, L"loop") == 0) return L"a(?&loop)?";
+    if (wcscmp(name, L"w") == 0) return L"abc";
+    if (wcscmp(name, L"bad") == 0) return L"(";
+    return 0;
+}
+
+static bool CompileFails(const wchar_t* pat, CRegexpResolveProc proc, ResolveLog* log, int* pos = 0, char* msg = 0)
+{
+    try {
+        CRegexpW re(pat, 0, proc, log);
+    } catch (CRegexpException& e) {
+        if (pos) *pos = e.GetPosition();
+        if (msg) { strncpy(msg, e.what(), 95); msg[95] = 0; }
+        return e.GetCode() == CRegexpException::ERR_SYNTAX;
+    }
+    return false;
+}
+
+static void TestResolver()
+{
+    ResolveLog log = { 0 };
+    CRegexpContext ctx;
+    CRegexpW date(L"^(?&date)$", 0, TestResolver, &log);
+    CHECK(log.calls == 3);                                   // date, d4, d2: each name once
+    CHECK(date.Match(L"2024-05-17", ctx) && ctx.GetEnd(0) == 10);
+    CHECK(!date.Match(L"2024-5-17", ctx));
+    CHECK(date.GetGroupNumber(L"date") == 1 && date.GetGroupNumber(L"d4") == 2 && date.GetGroupCount() == 3);
+    CHECK(!ctx.IsMatched(1));                                // groups of a subroutine call are restored on return
+
+    log.calls = 0;
+    CRegexpW paren(L"x(?&paren)y", 0, TestResolver, &log);
+    CHECK(paren.Match(L"..x(a(b)c)y", ctx) && ctx.GetStart(0) == 2 && ctx.GetEnd(0) == 11);
+    CHECK(!paren.Match(L"x(a(b)cy", ctx));
+    CHECK(log.calls == 1);
+
+    CHECK(CRegexpW(L"^(?P>d2)-(?R<d2>)$", 0, TestResolver, &log).Match(L"12-34", ctx));
+    CHECK(CRegexpW(L"^(?&loop)$", 0, TestResolver, &log).Match(L"aaa", ctx));
+
+    // a name the pattern defines itself is not asked for
+    log.calls = 0;
+    CHECK(CRegexpW(L"(?<d4>\\d\\d)(?&d4)", 0, TestResolver, &log).Match(L"1234", ctx) && log.calls == 0);
+
+    // flags given to Compile() apply to the resolved pattern; inline options of the caller do not
+    CHECK(CRegexpW(L"^(?&w)$", CRegexpW::IGNORECASE, TestResolver, &log).Match(L"ABC", ctx));
+    CHECK(!CRegexpW(L"^(?i)(?&w)$", 0, TestResolver, &log).Match(L"ABC", ctx));
+
+    // without a resolver, or when it does not know the name, or when its pattern is bad: a syntax error
+    int pos = 0;
+    char msg[96] = "";
+    CHECK(CompileFails(L"(?&date)", 0, 0));
+    CHECK(CompileFails(L"(?&nope)", TestResolver, &log));
+    CHECK(CompileFails(L"a(?&bad)", TestResolver, &log, &pos, msg) && pos == -1 && strstr(msg, "bad") != 0);
+    CHECK(CompileFails(L"(?1)", TestResolver, &log));         // only names are resolved
+    CHECK(CompileFails(L"\\k<date>", TestResolver, &log));    // not a subroutine call
+    CRegexpW plain;
+    bool thrown = false;
+    try { plain.Compile(L"(?&date)"); } catch (CRegexpException&) { thrown = true; }
+    CHECK(thrown && !plain.IsCompiled());
+}
+
+static void TestDollar()
+{
+    CRegexpContext ctx;
+    CHECK(CRegexpW(L"a$").Match(L"a\n", ctx));                                    // like PCRE: before the final newline
+    CHECK(!CRegexpW(L"a$").Match(L"a\n\n", ctx));
+    CHECK(!CRegexpW(L"a$", CRegexpW::DOLLAR_ENDONLY).Match(L"a\n", ctx));
+    CHECK(CRegexpW(L"a$", CRegexpW::DOLLAR_ENDONLY).Match(L"a", ctx));
+    CHECK(CRegexpW(L"a$", CRegexpW::DOLLAR_ENDONLY | CRegexpW::MULTILINE).Match(L"a\nb", ctx));   // ignored with MULTILINE
+    CHECK(CRegexpW(L"a\\z").Match(L"a", ctx) && !CRegexpW(L"a\\z").Match(L"a\n", ctx));
+    CHECK(CRegexpW(L"a$", CRegexpW::NEWLINE_CRLF).Match(L"a\r\n", ctx));
+    CHECK(!CRegexpW(L"a$", CRegexpW::NEWLINE_CRLF).Match(L"a\n", ctx));
+}
+
 static void TestErrors()
 {
     CRegexpW re;
@@ -242,6 +324,8 @@ int main()
     RUN(TestReplace);
     RUN(TestMatchApi);
     RUN(TestNewlineFlags);
+    RUN(TestDollar);
+    RUN(TestResolver);
     RUN(TestErrors);
     RUN(TestLimits);
     RUN(TestLongInput);
