@@ -1,0 +1,219 @@
+// API level tests: Replace(), contexts, GLOBAL iteration, limits, exceptions, big inputs.
+#include "../uka_regexp.h"
+#include <stdio.h>
+#include <string.h>
+#include <wchar.h>
+
+static int g_failed = 0, g_total = 0;
+
+#define CHECK(cond) do { ++g_total; if (!(cond)) { ++g_failed; printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
+
+static bool Repl(const wchar_t* pat, unsigned int flags, const wchar_t* str, const wchar_t* repl, const wchar_t* expected, int count = -1)
+{
+    CRegexpW re(pat, flags);
+    CRegexpString out;
+    int n = re.Replace(str, repl, out);
+    bool ok = wcscmp(out.c_str(), expected) == 0 && (count < 0 || n == count);
+    if (!ok) printf("  Replace(/%ls/, \"%ls\", \"%ls\") = \"%ls\" (%d), expected \"%ls\"\n", pat, str, repl, out.c_str(), n, expected);
+    return ok;
+}
+
+static void TestReplace()
+{
+    CHECK(Repl(L"(\\d+)-(\\d+)", 0, L"tel 03-1234!", L"$2-$1", L"tel 1234-03!", 1));
+    CHECK(Repl(L"a", 0, L"aaa", L"b", L"baa", 1));
+    CHECK(Repl(L"a", CRegexpW::GLOBAL, L"aaa", L"b", L"bbb", 3));
+    CHECK(Repl(L"x", 0, L"abc", L"y", L"abc", 0));
+    CHECK(Repl(L"x*", CRegexpW::GLOBAL, L"abc", L"-", L"-a-b-c-"));
+    CHECK(Repl(L"", CRegexpW::GLOBAL, L"ab", L"-", L"-a-b-"));
+    CHECK(Repl(L"\\d*", CRegexpW::GLOBAL, L"a12b", L"<$&>", L"<>a<12><>b<>"));
+    CHECK(Repl(L"(?<y>\\d{4})-(?<m>\\d\\d)", 0, L"2024-05", L"${m}/${y}", L"05/2024"));
+    CHECK(Repl(L"(?<y>\\d{4})-(?<m>\\d\\d)", 0, L"2024-05", L"${2}/${1}", L"05/2024"));
+    CHECK(Repl(L"b", 0, L"abc", L"[$`|$&|$']", L"a[a|b|c]c"));
+    CHECK(Repl(L"b", 0, L"abc", L"[$_]", L"a[abc]c"));
+    CHECK(Repl(L"b", 0, L"abc", L"$$1", L"a$1c"));
+    CHECK(Repl(L"(a)|(b)", CRegexpW::GLOBAL, L"ab", L"<$+>", L"<a><b>"));
+    CHECK(Repl(L"(a)(b)?", 0, L"a", L"[$2]", L"[]"));
+    CHECK(Repl(L"(a)", 0, L"a", L"$10", L"a0"));        // $1 followed by '0'
+    CHECK(Repl(L"(a)", 0, L"a", L"$5", L"$5"));         // no such group: kept
+    CHECK(Repl(L"(a)", 0, L"a", L"${x}", L"${x}"));
+    CHECK(Repl(L"(a)", 0, L"a", L"$", L"$"));
+    CHECK(Repl(L"(a)", 0, L"a", L"$0$0", L"aa"));
+    CHECK(Repl(L"foo\\Kbar", 0, L"foobar", L"X", L"fooX"));
+    CHECK(Repl(L"(?<=a)b", CRegexpW::GLOBAL, L"abab", L"X", L"aXaX"));
+    CHECK(Repl(L"\\s+", CRegexpW::GLOBAL, L"a  b\t\nc", L" ", L"a b c"));
+    CHECK(Repl(L"あ", CRegexpW::GLOBAL, L"あいあ", L"ア", L"アいア"));
+    CHECK(Repl(L"(?g)a", 0, L"aa", L"b", L"bb"));   // (?g) turns the global mode on
+    CHECK(Repl(L"^", CRegexpW::GLOBAL | CRegexpW::MULTILINE, L"a\nb", L"> ", L"> a\n> b"));
+}
+
+static void TestMatchApi()
+{
+    CRegexpW re(L"(a)(b)?");
+    CRegexpContext ctx;
+    CHECK(re.GetGroupCount() == 2);
+    CHECK(re.Match(L"xxac", ctx));
+    CHECK(ctx.GetGroupCount() == 2);
+    CHECK(ctx.GetStart(0) == 2 && ctx.GetEnd(0) == 3);
+    CHECK(ctx.IsMatched(1) && ctx.GetStart(1) == 2 && ctx.GetEnd(1) == 3);
+    CHECK(!ctx.IsMatched(2) && ctx.GetStart(2) == -1 && ctx.GetEnd(2) == -1);
+    CHECK(ctx.GetStart(3) == -1 && ctx.GetStart(-1) == -1);
+    CHECK(!re.Match(L"xyz", ctx));
+    CHECK(!ctx.IsMatched(0) && ctx.GetGroupCount() == 0);
+
+    // explicit start offset and length
+    CRegexpW re2(L"a");
+    CHECK(re2.Match(L"aXa", 3, ctx, 1) && ctx.GetStart(0) == 2);
+    CHECK(!re2.Match(L"aXa", 3, ctx, 3));
+    CHECK(!re2.Match(L"aXa", 3, ctx, 4));
+    CHECK(re2.Match(L"aXa", 1, ctx) && ctx.GetEnd(0) == 1);          // length given: the rest is invisible
+    CHECK(!re2.Match(L"bXa", 2, ctx));
+    CHECK(CRegexpW(L"a$").Match(L"ab", 1, ctx));                      // $ sees the length, not the NUL
+
+    // \b and ^ use the whole string even when starting in the middle
+    CRegexpW re3(L"^b");
+    CHECK(!re3.Match(L"ab", 2, ctx, 1));
+    CRegexpW re4(L"\\bb");
+    CHECK(!re4.Match(L"ab", 2, ctx, 1));
+
+    // \G without GLOBAL: where the search starts
+    CRegexpW re5(L"\\Gb");
+    CHECK(re5.Match(L"abb", 3, ctx, 1) && ctx.GetStart(0) == 1);
+    CHECK(!re5.Match(L"abb", 3, ctx, 0));
+
+    // GLOBAL: the context remembers where the previous match ended
+    CRegexpW g(L"\\d+", CRegexpW::GLOBAL);
+    CRegexpContext gc;
+    const wchar_t* s = L"a1b22c333";
+    int starts[8], n = 0;
+    while (g.Match(s, gc) && n < 8) starts[n++] = gc.GetStart(0);
+    CHECK(n == 3 && starts[0] == 1 && starts[1] == 3 && starts[2] == 6);
+    CHECK(g.Match(s, gc) && gc.GetStart(0) == 1);                      // after a failure it starts over
+    gc.Reset();
+    CHECK(g.Match(s, gc) && gc.GetStart(0) == 1);
+    CHECK(g.Match(s, gc) && gc.GetStart(0) == 3);
+
+    // named groups
+    CRegexpW named(L"(?<year>\\d+)-(?'mon'\\d+)-(?P<day>\\d+)");
+    CHECK(named.GetGroupNumber(L"year") == 1 && named.GetGroupNumber(L"mon") == 2 && named.GetGroupNumber(L"day") == 3);
+    CHECK(named.GetGroupNumber(L"nope") == -1);
+    CRegexpW jp(L"(?<名前>\\p{L}+)");
+    CHECK(jp.GetGroupNumber(L"名前") == 1);
+
+    // flags
+    CHECK(CRegexpW(L"abc", CRegexpW::IGNORECASE).Match(L"xABCx", ctx));
+    CHECK(CRegexpW(L"^b", CRegexpW::MULTILINE).Match(L"a\nb", ctx));
+    CHECK(CRegexpW(L"a.b", CRegexpW::SINGLELINE).Match(L"a\nb", ctx));
+    CHECK(!CRegexpW(L"a.b").Match(L"a\nb", ctx));
+    CHECK(CRegexpW(L"a b", CRegexpW::EXTENDED).Match(L"ab", ctx));
+
+    // embedded NUL: only with an explicit length
+    wchar_t nul[4] = { L'a', 0, L'b', 0 };
+    CHECK(CRegexpW(L"a.b", CRegexpW::SINGLELINE).Match(nul, 3, ctx));
+    CRegexpString out;
+    CHECK(CRegexpW(L"b").Replace(nul, 3, L"X", out) == 1 && out.size() == 3 && out.c_str()[2] == L'X');
+}
+
+static void TestErrors()
+{
+    CRegexpW re;
+    CRegexpContext ctx;
+    CHECK(!re.IsCompiled());
+    bool thrown = false;
+    try { re.Match(L"a", ctx); } catch (CRegexpException& e) { thrown = e.GetCode() == CRegexpException::ERR_NOT_COMPILED; }
+    CHECK(thrown);
+
+    thrown = false;
+    try { re.Compile(L"ab(cd"); } catch (CRegexpException& e) {
+        thrown = e.GetCode() == CRegexpException::ERR_SYNTAX && e.GetPosition() == 2 && e.what()[0] != 0;
+    }
+    CHECK(thrown);
+    CHECK(!re.IsCompiled());
+
+    re.Compile(L"a+");
+    CHECK(re.IsCompiled() && re.Match(L"caab", ctx) && ctx.GetEnd(0) == 3);
+    thrown = false;
+    try { re.Compile(L"("); } catch (CRegexpException&) { thrown = true; }
+    CHECK(thrown && re.IsCompiled() && re.Match(L"aa", ctx));          // the old pattern survives a failed Compile
+
+    thrown = false;
+    try { CRegexpW bad(L"[a"); } catch (CRegexpException&) { thrown = true; }
+    CHECK(thrown);
+
+    // deep nesting is rejected instead of overflowing the C stack
+    wchar_t deep[3001];
+    int i;
+    for (i = 0; i < 1500; ++i) { deep[i] = L'('; deep[3000 - i - 1] = L')'; }
+    deep[3000] = 0;
+    thrown = false;
+    try { CRegexpW d(deep); } catch (CRegexpException&) { thrown = true; }
+    CHECK(thrown);
+}
+
+static void TestLimits()
+{
+    CRegexpContext ctx;
+    CRegexpW bad(L"(.*a){12}c");
+    bool limit = false;
+    try { bad.Match(L"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ctx); }
+    catch (CRegexpException& e) { limit = e.GetCode() == CRegexpException::ERR_STEP_LIMIT; }
+    CHECK(limit);
+
+    // the limit can be changed
+    CRegexpW quad(L"\\w+@");
+    static wchar_t big[60001];
+    int i;
+    for (i = 0; i < 60000; ++i) big[i] = L'a';
+    big[60000] = 0;
+    limit = false;
+    try { quad.Match(big, ctx); } catch (CRegexpException&) { limit = true; }
+    CHECK(limit);
+    quad.SetStepLimit(0xFFFFFFFFUL, 0);
+    for (i = 0; i < 3000; ++i) big[i] = L'a';
+    big[3000] = 0;
+    limit = false;
+    try { CHECK(!quad.Match(big, ctx)); } catch (CRegexpException&) { limit = true; }
+    CHECK(!limit);
+
+    // normal patterns have plenty of room
+    CRegexpW ok(L"\\w+@");
+    for (i = 0; i < 2000; ++i) big[i] = L'a';
+    big[2000] = L'@';
+    big[2001] = 0;
+    CHECK(ok.Match(big, ctx) && ctx.GetEnd(0) == 2001);
+}
+
+// long subjects must not overflow the C stack (the matcher uses its own stack)
+static void TestLongInput()
+{
+    const int N = 2000000;
+    wchar_t* s = new wchar_t[N + 2];
+    int i;
+    for (i = 0; i < N; ++i) s[i] = (i & 1) ? L'b' : L'a';
+    s[N] = L'!';
+    s[N + 1] = 0;
+    CRegexpContext ctx;
+    CHECK(CRegexpW(L"(?:a|b)*").Match(s, ctx) && ctx.GetEnd(0) == N);
+    CHECK(CRegexpW(L"(a|b)+!").Match(s, ctx) && ctx.GetEnd(0) == N + 1);
+    CHECK(CRegexpW(L"[ab]*!").Match(s, ctx) && ctx.GetEnd(0) == N + 1);
+    CHECK(CRegexpW(L".*!").Match(s, ctx) && ctx.GetEnd(0) == N + 1);
+    CHECK(CRegexpW(L"(?:ab)*?!").Match(s, ctx) && ctx.GetEnd(0) == N + 1);
+    CHECK(CRegexpW(L"(?:ab){0,}!").Match(s, ctx) && ctx.GetEnd(0) == N + 1);
+    CHECK(CRegexpW(L"\\bz|!").Match(s, ctx) && ctx.GetStart(0) == N);
+    CHECK(CRegexpW(L"(?<=b)!").Match(s, ctx) && ctx.GetStart(0) == N);
+    CHECK(CRegexpW(L"(?<=a+)!").Match(s, N + 1, ctx, N) == false);   // starts at the end: one lookbehind
+    delete[] s;
+}
+
+#define RUN(t) do { try { t(); } catch (CRegexpException& e) { ++g_failed; printf("FAIL: %s threw: %s\n", #t, e.what()); } } while (0)
+
+int main()
+{
+    RUN(TestReplace);
+    RUN(TestMatchApi);
+    RUN(TestErrors);
+    RUN(TestLimits);
+    RUN(TestLongInput);
+    printf("%d checks, %d failed\n", g_total, g_failed);
+    return g_failed ? 1 : 0;
+}

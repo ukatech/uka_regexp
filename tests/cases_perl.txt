@@ -1,0 +1,549 @@
+# Cases compared against Perl 5.38 by tests/compare_perl.sh (differences that are by design are listed in perl_known_diffs.txt)
+	abc	xxabcxx
+	a.c	abc
+	a.c	a\nc
+	a|b|c	zzc
+	a*	aaab
+	a+	baaa
+	a?b	ab
+	a{2}	aaa
+	a{2,}	aaaa
+	a{2,3}	aaaa
+	a{,3}	a{,3}
+	x{1,2}y	xxxy
+	(a)(b)?	ac
+	(a)|(b)	b
+	(a|b)*c	abac
+	(a*)*	b
+	(a*)+	b
+	(a|ab)(c|bcd)(d*)	abcd
+	^abc$	abc
+	^abc$	abc\n
+	\Aabc\z	abc
+	abc\Z	abc\n
+	abc\z	abc\n
+	a.*b	a1b2b3
+	a.*?b	a1b2b3
+	a+?	aaa
+	a??b	ab
+	(a+)+b	aaab
+	(?:ab)+	ababab
+	(?:ab){2}	ababab
+	a{0}b	ab
+	(a){0}b	ab
+	\.	a.b
+	\*\+\?	*+?
+	[.]	a.b
+	a{1	a{1
+	a{	a{
+	}	}
+	]	]
+	a{1,2}{2}	aaaa
+	x*	aaa
+		abc
+	|a	a
+	a|	a
+	()	a
+	(|a)*	aaa
+	(a|)*	aaa
+	(?:a|b)*?c	abc
+	\t	a\tb
+	\n	a\nb
+	\r\n	a\r\nb
+	\x41	xAx
+	\x{41}	xAx
+	\x{3042}	あ
+	\u3042	あ
+	\u{3042}	あ
+	\x{1F600}	😀
+	\u{1F600}	😀
+	\a	\x07
+	\e	\x1b
+	\f\v	\x0c\x0b
+	\0	\x00
+	\012	\n
+	\cA	\x01
+	\cz	\x1a
+	\Qa.b\E	a.b
+	\Qa.b\E	axb
+	\Qa.b	a.b
+	a\Q+\E+	a+++
+	\Qab\E*	abbb
+	\Uabc\E	ABC
+	\Uabc\E	abc
+	\LABC\E	abc
+	\LABC\E	ABC
+	x\Uab\Ey	xABy
+	\y	y
+	\-	-
+	\/	/
+	\ 	a b
+	\#	#
+	\<	<
+	[abc]	xxb
+	[a-c]+	xabcabcx
+	[^abc]+	abxyzc
+	[]a]	]
+	[^]a]	]b
+	[a-]	-
+	[-a]	-
+	[a\-z]+	a-z
+	[\d_]+	a1_2b
+	[\w.]+	foo.bar!
+	[\s]+	a \t\nb
+	[\D]+	12ab34
+	[\W]+	ab!?cd
+	[\S]+	  ab  
+	\d+	ab123c
+	\D+	12ab34
+	\w+	  foo_bar9 
+	\W+	ab  !cd
+	\s+	ab \t\n cd
+	\S+	  ab  
+	\h+	a \t b
+	\H+	  ab 
+	\h	\x{3000}
+	\h	\x{a0}
+	\d	１
+	\w	あ
+	\s	\x{3000}
+	[[:alpha:]]+	12abc34
+	[[:^alpha:]]+	ab12cd
+	[[:digit:]]+	ab12
+	[[:alnum:]]+	--ab12--
+	[[:upper:]]+	abCDef
+	[[:lower:]]+	ABcdEF
+	[[:space:]]+	a \t b
+	[[:punct:]]+	ab!?cd
+	[[:xdigit:]]+	xyz1aF
+	[[:blank:]]+	a \t\nb
+	[[:cntrl:]]	a\x01b
+	[[:print:]]+	\x01ab c\x02
+	[[:graph:]]+	\x01ab c\x02
+	[[:ascii:]]+	あab
+	[[:word:]]+	!ab_1!
+	[a[:digit:]]+	xa1b
+	[[:alpha:][:digit:]]+	!a1!
+	[\]]	]
+	[\^a]	^
+	[a^]	^
+	[[]	[
+	[a-a]	a
+	[\x41-\x43]+	ABCD
+	[\x{3041}-\x{3093}]+	xあいうx
+	[あ-ん]+	xあいうx
+	[\b]	\x08
+	[\n]	\n
+	[\p{Lu}\d]+	ab1Cd
+	[^\p{L}]+	ab12cd
+	[\P{L}]+	ab12cd
+	[a-\d]	-
+	[\d-z]+	1-z
+	[\w-]+	a-b c
+	[.*+?]+	a.*+?b
+	[a-z&&[^b]]	b
+	[\Qa-z\E]+	a-z
+	[[:alpha:]-z]+	ab-z1
+	\p{L}+	12abcあ34
+	\pL+	12abcあ34
+	\p{Lu}+	abCDef
+	\p{Ll}+	ABcdEF
+	\P{L}+	ab12cd
+	\p{^L}+	ab12cd
+	\p{N}+	ab１２3
+	\p{Nd}+	ab１２3
+	\p{P}+	ab!?、。cd
+	\p{S}+	ab+=$cd
+	\p{Z}+	a b\x{3000}c
+	\p{Zs}+	a b\x{3000}c
+	\p{Cc}	a\x01b
+	\p{L&}+	12aBあ
+	\p{LC}+	12aBあ
+	\p{Any}+	abc
+	\p{ASCII}+	あabc
+	\p{Assigned}+	ab
+	\p{White_Space}+	a \x{3000}\x{2028}b
+	\p{Space}+	a \x{3000}b
+	\p{Word}+	!あa_1!
+	\p{Xan}+	!あa_1!
+	\p{Xwd}+	!あa_1!
+	\p{Xsp}+	a \x{3000}b
+	\p{Lo}+	aあいb
+	\p{Lm}	aーb
+	\p{Mn}	a\x{301}b
+	\p{Sc}	a$b
+	\p{Pd}	a-b
+	\p{Ps}\p{Pe}	a(b)
+	\p{Cn}	\x{378}
+	\p{Co}	\x{e000}
+	\p{Cf}	a\x{200b}b
+	\p{Foo}	a
+	\P{Foo}	a
+	\p{Nl}	Ⅷ
+	\p{No}	½
+	\p{Zl}	\x{2028}
+	\p{Pc}	a_b
+	\p{Sm}	a+b
+	\p{Sk}	a^b
+	\p{So}	©
+	\p{Pi}	«
+	\p{Pf}	»
+	\p{Lt}	ǅ
+	\p{Me}	\x{20dd}
+	\p{Mc}	ा
+	^b	a\nb
+m	^b	a\nb
+m	a$	a\nb
+	a$	a\nb
+m	^$	a\n\nb
+m	^	a\nb
+m	$	a\nb
+	\bfoo\b	a foo b
+	\bfoo\b	afoob
+	\Boo\B	afoob
+	\b	  
+	\B	  
+	\b	あa
+m	\Aa	b\na
+m	a\z	a\na
+m	a\Z	a\n
+	\bあ	あ
+	a\b	a
+	\b	
+i	abc	xABCx
+i	[a-c]+	xABCx
+i	[^a-c]+	ABCdef
+i	ß	SS
+i	σ	Σ
+i	ς	Σ
+i	Σ	ς
+i	д	Д
+i	é	É
+i	k	\x{212a}
+i	\x{212a}	k
+i	(a)\1	aA
+	(a)\1	aA
+i	(?-i)a	A
+	(?i)a	A
+	a(?i)b	aB
+	a(?i)b	AB
+	a(?i:b)c	aBc
+	a(?i:b)c	aBC
+	(?i)a(?-i)b	Aab
+	(?i)a(?-i)b	AaB
+	(a(?i)b)c	aBc
+	(a(?i)b)c	aBC
+	(?:(?i)a|b)c	Bc
+	(?:(?i)a|b)c	bc
+s	a.b	a\nb
+	a.b	a\nb
+	(?s)a.b	a\nb
+	(?s:a.b)	a\nb
+s	(?-s)a.b	a\nb
+m	(?-m)^b	a\nb
+	(?m)^b	a\nb
+x	a b c	abc
+x	a b c	a b c
+x	a\ b	a b
+x	a [ ] b	a b
+x	a # comment<LF>b	ab
+x	a#c<LF>b	ab
+	(?x) a b 	ab
+x	(?-x) a	  a
+x	a +	aaa
+x	a {2}	aaa
+x	a\ #x<LF>b	a b
+x	[ a]	  
+i	\p{Lu}	a
+i	\p{Ll}+	aB
+i	[[:upper:]]+	abC
+i	[[:lower:]]+	ABc
+i	\W	K
+i	[\W]	K
+i	\x{212a}	K
+imsx	a . b	A\nB
+i	straSSe	STRASSE
+i	\x{1e9e}	\x{df}
+	(a)(b)(c)	abc
+	(a(b(c)))	abc
+	(?:a)(b)	ab
+	(?<n>a)(?<m>b)\k<n>	aba
+	(?'n'a)\k'n'	aa
+	(?P<n>a)(?P=n)	aa
+	(?<n>a)\g{n}	aa
+	(a)\g1	aa
+	(a)\g{1}	aa
+	(a)\g{-1}	aa
+	(a)(b)\g-2	aba
+	(a)\1	aa
+	(a)\1	ab
+	(a)|b\1	b
+	(a*)\1	aaaa
+	(a*)\1b	aaab
+	\1(a)	aa
+	(\2two|(one))+	oneonetwo
+	(a)(?<n>b)	ab
+	(?|(a)|(b))	b
+	(?|(a)(b)|(c))(d)	cd
+	(?|(?<n>a)|(?<n>b))\k<n>	bb
+	(?|a(b)|(c)d)(e)	ace
+	(?<n>a)(?<n>b)	ab
+	(a)?\1	a
+	(a)?b\1	b
+	(?>a+)b	aaab
+	(?>a+)ab	aaab
+	(?>a|ab)c	abc
+	(?>(a+))b	aab
+	a++b	aaab
+	a++a	aaa
+	a*+a	aaa
+	a?+a	a
+	(?:ab)++a	ababa
+	(?:a|ab)++c	abc
+	a{1,2}+a	aaa
+	a{2}+	aaa
+	\w++\d	abc123
+	.*+x	abcx
+	(?#comment)a	a
+	a(?#c)b	ab
+	(a)(?#x)\1	aa
+	(a)(b)(c)(d)(e)(f)(g)(h)(i)(j)\10	abcdefghijj
+	(a)\10	a\x08
+	\101	A
+	(a)\11	a\x09
+	\8	8
+	(a)\8	a8
+	(?<1>a)(b)	ab
+	(?<2>a)(b)	ab
+	a(?=b)	ab
+	a(?=b)	ac
+	a(?!b)	ab
+	a(?!b)	ac
+	(?<=a)b	ab
+	(?<=a)b	cb
+	(?<!a)b	ab
+	(?<!a)b	cb
+	(?<=ab+)c	abbbc
+	(?<=ab+)c	ac
+	(?<=a|bc)d	bcd
+	(?<=a|bc)d	ad
+	(?<=a|bc)d	cd
+	(?<!a|bc)d	bcd
+	(?<=\d{3})x	123x
+	(?<=\d{3})x	12x
+	(?<=^|,)a	x,a
+	(?<=^|,)a	a
+	(?<=a(?=b))b	ab
+	(?=(a))a	a
+	(?=(a+))a*b\1	baaabac
+	(?!(a))b	b
+	(?<=(a))b	ab
+	(?<!(a))b	cb
+	(?=a)	a
+	(?!a)	a
+	(?<=a)	a
+	(?<!a)	a
+	(?=.*\d)(?=.*[a-z]).{4}	ab12
+	^(?=.*\d)(?=.*[a-z]).{4}$	abcd
+	(?<=x)a|(?<=y)b	yb
+	(?<=a.)c	abc
+	(?<=.{2})c	abc
+	(?<=.{2})c	bc
+	(?<=a{1,3})b	aaab
+	(?<=(?:ab)+)c	ababc
+	(?<![a-z])\d	a1 2
+	(?<=\b)a	a
+	(?<=a)(?<=b)	ab
+	\d+(?=%)	50% 60
+	(?<=\$)\d+	cost $42
+	(?<!\d)\d{2}(?!\d)	123 45 6
+	(?<=(\d+))x	12x
+	(a)?(?(1)b|c)	ab
+	(a)?(?(1)b|c)	c
+	(a)?(?(1)b|c)	ac
+	(a)?(?(1)b)	ab
+	(a)?(?(1)b)	x
+	(?<n>a)?(?(n)b|c)	ab
+	(?<n>a)?(?(<n>)b|c)	c
+	(?<n>a)?(?('n')b|c)	c
+	(?(?=a)ab|cd)	ab
+	(?(?=a)ab|cd)	cd
+	(?(?!a)cd|ab)	ab
+	(?(?!a)cd|ab)	cd
+	(?(?<=a)b|c)	ab
+	(?(?<=a)b|c)	c
+	(?(?<!a)b|c)	ab
+	(?(?<!a)b|c)	xb
+	^(?:(a)|b)(?(1)c|d)$	ac
+	^(?:(a)|b)(?(1)c|d)$	bd
+	^(?:(a)|b)(?(1)c|d)$	bc
+	(?(DEFINE)(?<d>\d+))x(?&d)	x12
+	(?(DEFINE)(?<w>\w))(?&w)(?&w)	ab
+	(a)?(?(1)(?:b|c)|d)	ac
+	^(\((?1)*\))$	(()())
+	^(\((?1)*\))$	(()
+	\((?R)?\)	((()))
+	(\((?:[^()]|(?1))*\))	x(a(b)c)y
+	^(?<p>\((?:[^()]|(?&p))*\))$	(a(b)c)
+	^(a(?1)?b)$	aaabbb
+	^(a(?1)?b)$	aabbb
+	(?R)?a	aaa
+	^(?:a(?R)?b)$	aabb
+	(a)(?1)	aa
+	(a|b)(?1)	ab
+	(?<x>a|b)(?&x)(?P>x)	abb
+	^(.)(?:(?R)|.?)\1$	abcba
+	(\d)(?-1)	12
+	(?+1)(\d)	12
+	^((?:a|b(?1)c))$	bbacc
+	^(?:(\w)(?1)?)$	abc
+	(foo|bar)(?1)	foobar
+	^(?<n>[ab](?&n)?)$	abab
+	(a)(?:b(?1))	aba
+	(?:(a)|b)(?1)	ba
+	^(a|(b))(?1)$	ab
+	^((a)|b)(?1)$	ba
+	(\w+)\s(?1)	foo bar
+	^(?:(?<q>'[^']*')|(?&q))$	'abc'
+	(?(DEFINE)(?<num>\d+))(?&num)\+(?&num)	1+23
+	^(?<expr>\d+(?:\+(?&expr))?)$	1+2+3
+	a(?R)?	aaa
+	foo\Kbar	foobar
+	a\Kb\Kc	abc
+	(a)\Kb	ab
+	\Kab	ab
+g	a\Kb	abab
+	(?<=a)\Kb	ab
+g	\Ga	aaba
+g	\G\d	12a3
+g	\Gb	bbc
+	\Ga	ba
+g	a|\Gb	abbc
+g		ab
+g	x*	ab
+g	a*	baac
+g	\b	ab cd
+g	^	a\nb
+gm	^	a\nb
+g	.	ab
+g	\d+	a1b22c333
+g	(a)|(b)	ab
+g	a*?	aa
+g	(?=a)	aa
+g	(?<=a)	aa
+g	a|	ab
+g	|a	ab
+	(a+)(b+)?	aaa
+	(a|b)*	abab
+	(a|b)*?c	abc
+	(a*?)*	aa
+	(a?)*?b	aab
+	(a+|b+)*c	aabbc
+	((a)|(b))+	ab
+	(?:(a)|(b))+	ab
+	(?:(a)|(b)){2}	ab
+	(a)|(b)|(c)	c
+	(a)+	aaa
+	(a){2,3}	aaaa
+	(a){2,3}?	aaaa
+	(a?){3}	aa
+	(a|ab)*c	abac
+	(a*)(a*)	aaa
+	(a*?)(a*)	aaa
+	(a+?)(a*)	aaa
+	x*y*z*	xyz
+	(?:x|y)*?z	xyz
+	a.*c.*e	abcde
+	a.*?c.*?e	abcde
+	(?=(\w+))\1:	abc:
+	^(\w+)\s+\1$	hey hey
+	^(\w+)\s+\1$	hey you
+	(.)(.)\2\1	abba
+	(.)\1{2}	aaab
+	((.)\2)+	aabbc
+	^(?:(a)|(b)|(c))+$	abc
+	(a(b)?)+	aba
+	(a(b)?)+?c	abac
+	(\w)(?:\1)+	xaaab
+	a*b*c*	aabbcc
+	a{3}	aa
+	(a|b){2}	ab
+	(?:a{2}){2}	aaaa
+	(?:a{2,3}){2}	aaaaa
+	(?:a{0,2}){3}b	aaab
+	(a+)*b	aaa
+	(a|aa)+$	aaaa
+	^(a+)+$	aaaaaaaaaaaaaaaaaaaaaaaaaaaa!
+	(x+x+)+y	xxxxxxxxxxxxxxxxxxxxxxxx
+	^(([a-z])+.)+[A-Z]([a-z])+$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!
+	(\d{4})-(\d{2})-(\d{2})	date: 2024-05-17.
+	^[\w.+-]+@[\w-]+\.[\w.-]+$	foo.bar@example.co.jp
+	^[\w.+-]+@[\w-]+\.[\w.-]+$	foo@@example.com
+	<(\w+)[^>]*>(.*?)</\1>	<b class=x>bold</b> <i>it</i>
+	https?://[^\s/]+(/\S*)?	go to http://example.com/a/b?c=d now
+	\b(\w+)\s+\1\b	this is is a test
+	^\s*(\w+)\s*=\s*(.*?)\s*$	  key =  some value  
+i	^(?:\+81|0)\d{1,4}-\d{1,4}-\d{4}$	03-1234-5678
+	[ぁ-ん]+	これはひらがなのテスト
+	[ァ-ヶー]+	これはカタカナノテストデス
+	\p{Han}+	日本語
+	[\x{4e00}-\x{9fff}]+	日本語のテキスト
+	(?<year>\d{4})/(?<mon>\d\d)	on 2020/12/31
+m	^(\w+):\s*(.*)$	a: 1\nbb:  two\nccc
+g	\w+	hello, world foo
+g	(\w)(\w*)	hello world
+g	[^,]+	a,b,,c
+g	\s*,\s*	a , b,c ,d
+	^$	
+	^	
+	$	
+g		
+	(	a
+	(a	a
+	a)	a
+	)	a
+	[a	a
+	[	a
+	(?<n	a
+	(?<n>a	a
+	\	a
+	(?	a
+	(?<=a	a
+	(?P<n	a
+	(?P	a
+	(?P=	a
+	(?z)	a
+	(?<>a)	a
+	(?<n>a)\k<m>	a
+	\k<n>	a
+	\2(a)	a
+	(a)\2	a
+	a{2,1}	a
+	a{99999}	a
+	(?1)	a
+	(?<n>a)(?&m)	a
+	[z-a]	a
+	[[:foo:]]	a
+	(?(1)a|b|c)	a
+	(a)(?(2)b)	a
+	(?(?=a)b|c|d)	a
+	\x{110000}	a
+	\x{zz}	a
+	\p	a
+	\p{	a
+	(?i	a
+	(?i:	a
+	(?#	a
+	(?(	a
+	(?(1	a
+	(?-	a
+	(?<n-	a
+	(?<-n>a)	a
+	(?R	a
+	(?R<	a
+	(?&	a
+	\g	a
+	\g{	a
+	\k	a
+	\k<	a
+	(?<=a*)(?<n>)\k<q>	a
