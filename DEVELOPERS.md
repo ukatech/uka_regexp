@@ -114,8 +114,8 @@ CRegexpW re(L"^(?&date)$", 0, Resolve, /* user = */ 0);   // 呼ばれるのは�
 
 ### wchar_t のサイズ
 
-文字は `wchar_t` 1 個を 1 文字として扱います。`wchar_t` が 16 bit の環境（Windows）での扱いは、README の「制限」を参照してください。
-16 bit の `wchar_t` の挙動は、g++ / clang に `-fshort-wchar` を付けて確認できます。
+`wchar_t` が 32 bit の環境では 1 個が 1 文字、16 bit の環境（Windows）では UTF-16 のサロゲートペアを 1 文字として扱います（詳しくは README の「制限」）。位置（`GetStart()` など）はどちらも `wchar_t` 単位で、16 bit の環境では U+10000 以上の文字が 2 進みます。
+テスト（`tests/run_cases.cpp`）は結果の位置をコードポイント単位に直して表示するので、ケースファイルの期待値は 16 bit と 32 bit で共通です。16 bit の確認は Windows で行ってください。
 
 ## ビルドとテスト
 
@@ -137,6 +137,6 @@ make compare-perl    # Perl 5.30 以降があれば、tests/cases_perl.txt を P
 - **sanitize**: 同じ 3 環境で `-fsanitize=address,undefined` を付けて `make test` と `fuzz_gen.py` のランダムパターンを実行（結果は比べず、クラッシュと未定義動作だけを見る）。手元でも `make test BUILD=build/san CXXFLAGS="-std=c++98 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"` で同じことができる
 - **compare-perl**: Ubuntu の Perl で `make compare-perl`。既知の差分は Perl や Unicode の版で変わりうるため、失敗しても全体は赤にしない
 
-Linux・macOS の `wchar_t` は 32 bit です。16 bit の確認は Windows（MinGW・MSVC）で行ってください。
+Linux・macOS の `wchar_t` は 32 bit です。16 bit の確認は Windows で行ってください。
 
 ライセンスは `LICENSE` を参照してください。

@@ -7,7 +7,7 @@
 //   flags   i m s x u = IGNORECASE MULTILINE SINGLELINE EXTENDED UNICODE, g = GLOBAL (report every match)
 //   pattern the regular expression, "<LF>" stands for a line feed
 //   subject the subject; \n \t \r \\ \xHH \x{H..} are decoded
-//   result  per match "s-e" for every group (group 0 first, "-" if unmatched) separated by blanks;
+//   result  per match "s-e" (offsets in code points) for every group (group 0 first, "-" if unmatched) separated by blanks;
 //           matches separated by ";"; NOMATCH, ERR (bad pattern) or LIMIT (step limit)
 // Lines starting with # and empty lines are ignored.
 #include "../uka_regexp.h"
@@ -86,14 +86,28 @@ static std::wstring DecodeSubject(const std::string& s)
     return Utf8ToWide(out);
 }
 
-static std::string FormatMatch(const CRegexpW& re, const CRegexpContext& ctx)
+// offset in wchar_t units -> offset in code points (a surrogate pair counts once), so that the
+// expected results are the same where wchar_t is 16 bit and where it is 32 bit
+static int CpOffset(const std::wstring& ws, int off)
+{
+    int i = 0, cp = 0;
+    while (i < off) {
+        if (sizeof(wchar_t) == 2 && i + 1 < (int)ws.size() && (unsigned long)ws[i] >= 0xD800 && (unsigned long)ws[i] < 0xDC00 &&
+            (unsigned long)ws[i + 1] >= 0xDC00 && (unsigned long)ws[i + 1] < 0xE000) ++i;
+        ++i;
+        ++cp;
+    }
+    return cp;
+}
+
+static std::string FormatMatch(const CRegexpW& re, const CRegexpContext& ctx, const std::wstring& ws)
 {
     std::string r;
     int n = re.GetGroupCount(), g;
     for (g = 0; g <= n; ++g) {
         char buf[64];
         if (g) r += ' ';
-        if (ctx.IsMatched(g)) sprintf(buf, "%d-%d", ctx.GetStart(g), ctx.GetEnd(g));
+        if (ctx.IsMatched(g)) sprintf(buf, "%d-%d", CpOffset(ws, ctx.GetStart(g)), CpOffset(ws, ctx.GetEnd(g)));
         else strcpy(buf, "-");
         r += buf;
     }
@@ -127,7 +141,7 @@ static std::string RunCase(const std::string& flags, const std::string& pat, con
         int count = 0;
         while (re.Match(ws.c_str(), (int)ws.size(), ctx)) {
             if (count++) res += ';';
-            res += FormatMatch(re, ctx);
+            res += FormatMatch(re, ctx, ws);
             if (!all || count > 1000) break;
         }
         return count ? res : std::string("NOMATCH");

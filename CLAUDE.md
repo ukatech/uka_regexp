@@ -7,6 +7,7 @@ wchar_t 専用のバックトラック型正規表現エンジン。本体は `u
 - VC6 / 古い GCC でも通る C++98 に限る: STL・C++11・複雑なテンプレート不可、`for (int i…)` で変数を宣言しない（VC6 はスコープが漏れる）、`snprintf` や `long long` 不使用、クラス内 static const 初期化不可。
 - 内部は `namespace UkaRegexpImpl`。外に出す型は `uka_regexp.h` のものだけ。ヘッダは STL を include しない。
 - 状態の変更は必ず `SetSt()` 経由（undo を積む）。マッチ中に再帰呼び出しをしない。
+- 16bit `wchar_t` ではサロゲートペアを 1 文字として扱う。subject の「1 文字」は `DecodeAt()`、1 文字戻るのは `PrevLen()`、ペアの途中かは `IsMidPair()` で判断し、位置を `+1` / `-1` で進めない（32bit では定数に畳まれる）。位置の単位は `wchar_t` のまま。
 
 ## 構造（uka_regexp.cpp の順）
 Vec/データ構造/文字集合 → `Compiler`（パーサ→構文木 `Node`→`Gen` で int コード）→ `Matcher`（`Run`: 明示スタックのバックトラック VM）→ Unicode 関数 → 生成テーブル → 公開 API。

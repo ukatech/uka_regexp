@@ -11,6 +11,9 @@ import os
 import subprocess
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+
 run_cases, cases_file = sys.argv[1], sys.argv[2]
 here = os.path.dirname(os.path.abspath(__file__))
 perl_script = os.path.join(here, "perl_cases.pl")

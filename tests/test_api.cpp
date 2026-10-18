@@ -418,6 +418,84 @@ static void TestUnicodeFlag()
     CHECK(Repl(L"a{,2}", CRegexpW::GLOBAL, L"aaa", L"-", L"---", 3));   // a{,2} is a{0,2}
 }
 
+// a character beyond the BMP is one character: a surrogate pair where wchar_t is 16 bit
+static int PutCp(wchar_t* d, unsigned long cp)
+{
+    if (sizeof(wchar_t) == 2 && cp > 0xFFFF) {
+        cp -= 0x10000;
+        d[0] = (wchar_t)(0xD800 + (cp >> 10));
+        d[1] = (wchar_t)(0xDC00 + (cp & 0x3FF));
+        return 2;
+    }
+    d[0] = (wchar_t)cp;
+    return 1;
+}
+
+static void TestSurrogatePairs()
+{
+    wchar_t subj[16];
+    int units = (int)(sizeof(wchar_t) == 2 ? 2 : 1);   // wchar_t units of one emoji
+    int n = 0;
+    CRegexpContext ctx;
+    subj[n++] = L'a';
+    n += PutCp(subj + n, 0x1F600);
+    subj[n++] = L'b';
+    subj[n] = 0;
+
+    {
+        CRegexpW re(L".", CRegexpW::GLOBAL);   // three characters, never half of the emoji
+        int count = 0, expectStart[3];
+        expectStart[0] = 0; expectStart[1] = 1; expectStart[2] = 1 + units;
+        while (count < 5 && re.Match(subj, n, ctx)) {
+            CHECK(count < 3 && ctx.GetStart(0) == expectStart[count]);
+            CHECK(ctx.GetEnd(0) == (count == 1 ? 1 + units : expectStart[count] + 1));
+            ++count;
+        }
+        CHECK(count == 3);
+    }
+    {
+        CRegexpW re(L"x*", CRegexpW::GLOBAL);   // empty matches before a, before b ... but not inside the emoji
+        CRegexpString out;
+        CHECK(re.Replace(subj, n, L"-", out) == 4);
+        CHECK(out.size() == 4 + n);
+    }
+    {
+        CRegexpW re(L"a(.)b");
+        CHECK(re.Match(subj, n, ctx));
+        CHECK(ctx.GetStart(1) == 1 && ctx.GetEnd(1) == 1 + units);
+        CHECK(re.MatchExact(subj, n, ctx));
+    }
+    {
+        CRegexpW re(L"^.{3}$");
+        CHECK(re.Match(subj, n, ctx));
+        CRegexpW re2(L"(?<=a.)b");
+        CHECK(re2.Match(subj, n, ctx) && ctx.GetStart(0) == 1 + units);
+        CRegexpW re3(L"a.*?b");
+        CHECK(re3.Match(subj, n, ctx) && ctx.GetEnd(0) == n);
+    }
+    {
+        wchar_t pat[16];
+        int m = 0;
+        pat[m++] = L'[';
+        m += PutCp(pat + m, 0x1F600);
+        pat[m++] = L'-';
+        m += PutCp(pat + m, 0x1F64F);
+        pat[m++] = L']';
+        pat[m++] = L'+';
+        pat[m] = 0;
+        CRegexpW re(pat);   // [<U+1F600>-<U+1F64F>]+ written with the characters themselves
+        CHECK(re.Match(subj, n, ctx) && ctx.GetStart(0) == 1 && ctx.GetEnd(0) == 1 + units);
+    }
+    if (sizeof(wchar_t) == 2) {   // a lone surrogate is a character of its own
+        wchar_t lone[3];
+        lone[0] = 0xD83D;
+        lone[1] = L'a';
+        lone[2] = 0;
+        CRegexpW re(L"^..$");
+        CHECK(re.Match(lone, 2, ctx));
+    }
+}
+
 int main()
 {
     RUN(TestReplace);
@@ -430,6 +508,7 @@ int main()
     RUN(TestErrors);
     RUN(TestKeepInAssertion);
     RUN(TestUnicodeFlag);
+    RUN(TestSurrogatePairs);
     RUN(TestLimits);
     RUN(TestLongInput);
     printf("%d checks, %d failed\n", g_total, g_failed);

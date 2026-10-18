@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Generate random cases (same format as cases_perl.txt) for comparing the engine with Perl.
 
-usage: fuzz_gen.py SEED COUNT > cases.txt
+usage: fuzz_gen.py SEED COUNT [astral] > cases.txt
+
+With "astral" the patterns and subjects also contain characters beyond the BMP (a surrogate pair
+where wchar_t is 16 bit); the results are in code points, so they are the same for both sizes.
 
 Capture groups are never generated inside a quantified construct because Perl resets such captures
 on every iteration while this engine (like PCRE, .NET and Python) keeps the last value.
@@ -9,8 +12,19 @@ on every iteration while this engine (like PCRE, .NET and Python) keeps the last
 import random
 import sys
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+
 rnd = random.Random(int(sys.argv[1]))
 COUNT = int(sys.argv[2])
+ASTRAL = len(sys.argv) > 3 and sys.argv[3] == "astral"
+ASTRAL_CHARS = ["😀", "𐐀", "𐐨"]
+
+
+def lit():
+    if ASTRAL and rnd.random() < 0.3:
+        return rnd.choice(ASTRAL_CHARS)
+    return rnd.choice("abc")
 
 
 class Gen:
@@ -22,16 +36,18 @@ class Gen:
     def atom_simple(self):
         r = rnd.random()
         if r < 0.45:
-            return rnd.choice("abc")
+            return lit()
         if r < 0.55:
             return "."
         if r < 0.65:
+            if ASTRAL and rnd.random() < 0.3:
+                return rnd.choice(["[😀a]", "[^😀]", "[😀-🙏]", "[^a𐐀]"])
             return rnd.choice(["[ab]", "[^a]", "[a-c]", "[^bc]", "[b ]"])
         if r < 0.75:
             return rnd.choice(["\\w", "\\W", "\\d", "\\s", "\\D", "\\S", "\\N", "\\R", "\\h", "\\H"])
         if r < 0.80:
             return rnd.choice(["\\b", "\\B", "\\A", "\\z", "\\Z", "^", "$", "\\v", "\\V"])
-        return rnd.choice("abc")
+        return lit()
 
     def quant(self):
         r = rnd.random()
@@ -97,6 +113,8 @@ def subject(multiline):
     n = rnd.choice([0, 1, 2, 3, 4, 5, 6, 7, 8])
     alphabet = "aabbc 1A\n"
     s = "".join(rnd.choice(alphabet) for _ in range(n))
+    if ASTRAL:
+        s = "".join(c if rnd.random() < 0.7 else rnd.choice(ASTRAL_CHARS) for c in s)
     return s.replace("\n", "\\n")
 
 

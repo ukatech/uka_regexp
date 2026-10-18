@@ -77,6 +77,43 @@ namespace UkaRegexpImpl {
 
 typedef unsigned int Cp;   /* a code point */
 
+/*
+ * Where wchar_t is 16 bit the subject is UTF-16: a high surrogate followed by a low surrogate is
+ * one character.  A lone surrogate is a character of its own.  Offsets stay in wchar_t units, but a
+ * match never starts or ends between the two halves of a pair.  Where wchar_t is 32 bit all of this
+ * folds away at compile time.
+ */
+
+/* the code point at s[i] (i < n) and its length in wchar_t units */
+static inline Cp DecodeAt(const wchar_t* s, int n, int i, int& len)
+{
+    Cp c = (Cp)s[i];
+    len = 1;
+    if (sizeof(wchar_t) == 2 && c >= 0xD800 && c < 0xDC00 && i + 1 < n) {
+        Cp d = (Cp)s[i + 1];
+        if (d >= 0xDC00 && d < 0xE000) {
+            len = 2;
+            return 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00);
+        }
+    }
+    return c;
+}
+
+/* length of the character that ends at s[i] (i > 0) */
+static inline int PrevLen(const wchar_t* s, int i)
+{
+    if (sizeof(wchar_t) == 2 && i >= 2 && (Cp)s[i - 1] >= 0xDC00 && (Cp)s[i - 1] < 0xE000 &&
+        (Cp)s[i - 2] >= 0xD800 && (Cp)s[i - 2] < 0xDC00) return 2;
+    return 1;
+}
+
+/* is i in the middle of a surrogate pair? */
+static inline bool IsMidPair(const wchar_t* s, int n, int i)
+{
+    return sizeof(wchar_t) == 2 && i > 0 && i < n && (Cp)s[i] >= 0xDC00 && (Cp)s[i] < 0xE000 &&
+           (Cp)s[i - 1] >= 0xD800 && (Cp)s[i - 1] < 0xDC00;
+}
+
 static int WLen(const wchar_t* s)
 {
     int n = 0;
@@ -791,6 +828,7 @@ private:
     void ReadProperty(bool negated, ClassProp& p);
     void AddClassChars(ClassBuilder& cb, Cp lo, Cp hi);
     int MakeLiteral(Cp c);
+    Cp TakeCp();
     int CharNode(Cp c) { return NewNode(N_CHAR, (int)c, (m_flags & F_I) ? 1 : 0); }
     int SetNode(const Range* r, int n, bool negated);
     int AddName(int start, int len);
@@ -886,7 +924,7 @@ int Compiler::ParseSeq()
                 m_quote = 0;
                 continue;
             }
-            ++m_pos;
+            c = TakeCp();
             if (m_quote == 'U') c = UcUpper(c);
             else if (m_quote == 'L') c = UcLower(c);
             atom = MakeLiteral(c);
@@ -912,16 +950,16 @@ int Compiler::ParseSeq()
 
 int Compiler::MakeLiteral(Cp c)
 {
-    if (c > 0xFFFF && sizeof(wchar_t) == 2) {   /* UTF-16: a literal code point beyond the BMP becomes a surrogate pair */
-        Cp v = c - 0x10000;
-        int a = NewNode(N_CHAR, (int)(0xD800 + (v >> 10)), 0);
-        int b = NewNode(N_CHAR, (int)(0xDC00 + (v & 0x3FF)), 0);
-        int cat = NewNode(N_CAT);
-        m_nodes[a].next = b;
-        m_nodes[cat].child = a;
-        return cat;
-    }
     return CharNode(c);
+}
+
+/* the character at m_pos (a surrogate pair is one character), consumed */
+Cp Compiler::TakeCp()
+{
+    int len;
+    Cp c = DecodeAt(m_p, m_len, m_pos, len);
+    m_pos += len;
+    return c;
 }
 
 int Compiler::ParseAtom()
@@ -945,8 +983,7 @@ int Compiler::ParseAtom()
     case '\\':
         return ParseEscape();
     default:   /* includes a quantifier character with nothing to repeat, and '{' : taken literally */
-        ++m_pos;
-        return MakeLiteral(c);
+        return MakeLiteral(TakeCp());
     }
 }
 
@@ -1621,6 +1658,17 @@ bool Compiler::ReadCharEscape(Cp c, Cp& out)
                 v = v * 16 + (Cp)HexValue(At(m_pos + n));
             }
             m_pos += 4;
+            if (v >= 0xD800 && v < 0xDC00 && AtCh(m_pos, '\\') && AtCh(m_pos + 1, 'u')) {   /* 😀 : a surrogate pair is one character */
+                Cp lo = 0;
+                for (n = 0; n < 4; ++n) {
+                    if (m_pos + 2 + n >= m_len || HexValue(At(m_pos + 2 + n)) < 0) break;
+                    lo = lo * 16 + (Cp)HexValue(At(m_pos + 2 + n));
+                }
+                if (n == 4 && lo >= 0xDC00 && lo < 0xE000) {
+                    m_pos += 6;
+                    v = 0x10000 + ((v - 0xD800) << 10) + (lo - 0xDC00);
+                }
+            }
             out = v;
             return true;
         }
@@ -1918,22 +1966,14 @@ int Compiler::ParseEscape()
     }
     if (c >= '1' && c <= '9') return ParseNumericEscape(c);
     if (ReadCharEscape(c, ch)) return MakeLiteral(ch);
-    return MakeLiteral(c);   /* \. \* \\ ... and unknown escapes stand for the character itself */
+    --m_pos;   /* an unknown escape stands for the character itself (a surrogate pair is one character) */
+    return MakeLiteral(TakeCp());   /* \. \* \\ ... and unknown escapes stand for the character itself */
 }
 
 /* ---- character classes ---- */
 
 void Compiler::AddClassChars(ClassBuilder& cb, Cp lo, Cp hi)
 {
-    if (sizeof(wchar_t) == 2 && hi > 0xFFFF) {   /* UTF-16: beyond the BMP only the surrogate halves can be listed */
-        if (lo > 0xFFFF) {
-            Cp v = lo - 0x10000;
-            AddRange(cb.lit, (int)(0xD800 + (v >> 10)), (int)(0xD800 + (v >> 10)));
-            AddRange(cb.lit, (int)(0xDC00 + (v & 0x3FF)), (int)(0xDC00 + (v & 0x3FF)));
-            return;
-        }
-        hi = 0xFFFF;
-    }
     AddRange(cb.lit, (int)lo, (int)hi);
 }
 
@@ -1950,7 +1990,7 @@ int Compiler::ReadClassItem(ClassBuilder& cb, Cp& ch)
             m_quote = 0;
             return 2;
         }
-        ++m_pos;
+        c = TakeCp();
         if (m_quote == 'U') c = UcUpper(c);
         else if (m_quote == 'L') c = UcLower(c);
         ch = c;
@@ -1987,8 +2027,7 @@ int Compiler::ReadClassItem(ClassBuilder& cb, Cp& ch)
         }
     }
     if (c != '\\') {
-        ++m_pos;
-        ch = c;
+        ch = TakeCp();
         return 0;
     }
     if (m_pos + 1 >= m_len) Error("\\ at end of pattern");
@@ -2050,7 +2089,8 @@ int Compiler::ReadClassItem(ClassBuilder& cb, Cp& ch)
         return 0;
     }
     if (ReadCharEscape(c, ch)) return 0;
-    ch = c;
+    --m_pos;   /* an unknown escape stands for the character itself */
+    ch = TakeCp();
     return 0;
 }
 
@@ -2213,6 +2253,8 @@ void Compiler::Run()
     }
     m_prog.anchored = IsAnchored(root) ? 1 : 0;
     m_prog.firstChar = FirstLiteral(root);
+    if (sizeof(wchar_t) == 2 && m_prog.firstChar > 0xFFFF)   /* the search compares wchar_t units: use the high surrogate */
+        m_prog.firstChar = (int)(0xD800 + ((Cp)(m_prog.firstChar - 0x10000) >> 10));
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -2347,6 +2389,13 @@ void Compiler::LenOf(int n, int& mn, int& mx) const
         mn = mx = 0;
         return;
     }
+}
+
+/* the longest length in wchar_t units of text of mx characters (a character is two units where wchar_t is UTF-16) */
+static int MaxUnits(int mx)
+{
+    if (mx < 0 || sizeof(wchar_t) != 2) return mx;
+    return mx > LEN_CAP / 2 ? -1 : mx * 2;
 }
 
 /* the literal character every match must start with, or -1 */
@@ -2575,6 +2624,7 @@ void Compiler::Gen(int n)
         } else {
             int mn, mx;
             LenOf(nd.child, mn, mx);
+            mx = MaxUnits(mx);
             slot = Emit(OP_LB_BEGIN) + 1;
             Emit(-1);
             Emit(mn);
@@ -2639,6 +2689,7 @@ void Compiler::Gen(int n)
             } else {
                 int mn, mx;
                 LenOf(lk.child, mn, mx);
+                mx = MaxUnits(mx);
                 slot = Emit(OP_LB_BEGIN) + 1;
                 Emit(-1);
                 Emit(mn);
@@ -2768,32 +2819,49 @@ static inline bool NlBefore(int mode, const wchar_t* s, int i, int n)
     }
 }
 
-static inline bool AtomMatch(const Program& prog, int aop, int arg, const wchar_t* s, int i, int n)
+/* does the single character matcher (aop, arg) match the character at s[i] (i < n)?  Returns its length in wchar_t units, 0 if not */
+static inline int AtomLen(const Program& prog, int aop, int arg, const wchar_t* s, int i, int n)
 {
-    Cp c = (Cp)s[i];
+    int len;
+    Cp c = DecodeAt(s, n, i, len);
     switch (aop) {
-    case OP_CHAR:  return c == (Cp)arg;
-    case OP_CHARI: return UcFold(c) == (Cp)arg;
-    case OP_ANY:   return NlAt(prog.newline, s, i, n) == 0;
-    case OP_ANYNL: return true;
-    default:       return ClassMatch(prog, arg, c);
+    case OP_CHAR:  return c == (Cp)arg ? len : 0;
+    case OP_CHARI: return UcFold(c) == (Cp)arg ? len : 0;
+    case OP_ANY:   return NlAt(prog.newline, s, i, n) == 0 ? len : 0;
+    case OP_ANYNL: return len;
+    default:       return ClassMatch(prog, arg, c) ? len : 0;
     }
 }
 
-/* the code point at s[i] and its length in wchar_t units (surrogate pairs are joined where wchar_t is UTF-16) */
-static Cp DecodeAt(const wchar_t* s, int n, int i, int& len)
-{
-    Cp c = (Cp)s[i];
-    len = 1;
-    if (sizeof(wchar_t) == 2 && c >= 0xD800 && c < 0xDC00 && i + 1 < n) {
-        Cp d = (Cp)s[i + 1];
-        if (d >= 0xDC00 && d < 0xE000) {
-            len = 2;
-            return 0x10000 + ((c - 0xD800) << 10) + (d - 0xDC00);
-        }
+/*
+ * Walk over up to limit (-1: any number of) characters that the single character matcher (aop, arg)
+ * accepts, starting at q.  Returns the position after them and adds their number to *count.
+ * The same as calling AtomLen() in a loop, but with the choice of the matcher made once.
+ */
+#define SCAN_ATOMS(TEST) \
+    while (q < n && (limit < 0 || cnt < limit)) { \
+        Cp c = (Cp)s[q]; \
+        int len = 1; \
+        if (sizeof(wchar_t) == 2 && c >= 0xD800 && c < 0xDC00) c = DecodeAt(s, n, q, len); \
+        if (!(TEST)) break; \
+        q += len; \
+        ++cnt; \
     }
-    return c;
+
+static int ScanAtoms(const Program& prog, int aop, int arg, const wchar_t* s, int q, int n, int limit, int* count)
+{
+    int cnt = 0;
+    switch (aop) {
+    case OP_CHAR:  SCAN_ATOMS(c == (Cp)arg) break;
+    case OP_CHARI: SCAN_ATOMS(UcFold(c) == (Cp)arg) break;
+    case OP_ANY:   SCAN_ATOMS(NlAt(prog.newline, s, q, n) == 0) break;
+    case OP_ANYNL: SCAN_ATOMS(true) break;
+    default:       SCAN_ATOMS(ClassMatch(prog, arg, c)) break;
+    }
+    *count += cnt;
+    return q;
 }
+#undef SCAN_ATOMS
 
 enum { GCB_OTHER, GCB_CR, GCB_LF, GCB_CONTROL, GCB_EXTEND, GCB_ZWJ, GCB_RI, GCB_PREPEND, GCB_SPACING,
        GCB_L, GCB_V, GCB_T, GCB_LV, GCB_LVT };
@@ -3006,20 +3074,26 @@ bool Matcher::Run(int startPos)
             return true;
         }
         case OP_CHAR:
-            if (pos < n && (Cp)s[pos] == (Cp)code[pc + 1]) { ++pos; pc += 2; continue; }
-            goto fail;
         case OP_CHARI:
-            if (pos < n && UcFold((Cp)s[pos]) == (Cp)code[pc + 1]) { ++pos; pc += 2; continue; }
-            goto fail;
+        case OP_CLASS: {
+            int len;
+            if (pos >= n) goto fail;
+            len = AtomLen(m_prog, code[pc], code[pc + 1], s, pos, n);
+            if (len == 0) goto fail;
+            pos += len;
+            pc += 2;
+            continue;
+        }
         case OP_ANY:
-            if (pos < n && NlAt(nl, s, pos, n) == 0) { ++pos; ++pc; continue; }
-            goto fail;
-        case OP_ANYNL:
-            if (pos < n) { ++pos; ++pc; continue; }
-            goto fail;
-        case OP_CLASS:
-            if (pos < n && ClassMatch(m_prog, code[pc + 1], (Cp)s[pos])) { ++pos; pc += 2; continue; }
-            goto fail;
+        case OP_ANYNL: {
+            int len;
+            if (pos >= n) goto fail;
+            len = AtomLen(m_prog, code[pc], 0, s, pos, n);
+            if (len == 0) goto fail;
+            pos += len;
+            ++pc;
+            continue;
+        }
 
         case OP_BOL:
         case OP_BOS:
@@ -3047,8 +3121,9 @@ bool Matcher::Run(int startPos)
         }
         case OP_UWORDB:
         case OP_UNWORDB: {
-            bool before = pos > 0 && IsUcpWordCp((Cp)s[pos - 1]);
-            bool after = pos < n && IsUcpWordCp((Cp)s[pos]);
+            int len;
+            bool before = pos > 0 && IsUcpWordCp(DecodeAt(s, n, pos - PrevLen(s, pos), len));
+            bool after = pos < n && IsUcpWordCp(DecodeAt(s, n, pos, len));
             if ((before != after) == (code[pc] == OP_UWORDB)) { ++pc; continue; }
             goto fail;
         }
@@ -3130,7 +3205,14 @@ bool Matcher::Run(int startPos)
             if (code[pc] == OP_BACKREF) {
                 for (i = 0; i < len; ++i) if (s[bs + i] != s[pos + i]) goto fail;
             } else {
-                for (i = 0; i < len; ++i) if (UcFold((Cp)s[bs + i]) != UcFold((Cp)s[pos + i])) goto fail;
+                for (i = 0; i < len; ) {   /* character by character: a surrogate pair is folded as one character */
+                    int l1, l2;
+                    Cp c1 = DecodeAt(s, n, bs + i, l1);
+                    Cp c2 = DecodeAt(s, n, pos + i, l2);
+                    if (l1 != l2 || UcFold(c1) != UcFold(c2)) goto fail;
+                    i += l1;
+                }
+                if (i != len) goto fail;
             }
             pos += len;
             pc += 2;
@@ -3159,6 +3241,7 @@ bool Matcher::Run(int startPos)
             if (s0 < 0) goto fail;
             lo = (maxL < 0 || pos - maxL < 0) ? 0 : pos - maxL;
             if (s0 > lo) PushBt(BT_LB, pc + 4, s0 - 1, lo);
+            if (IsMidPair(s, n, s0)) goto fail;   /* the body cannot start inside a surrogate pair */
             pos = s0;
             pc += 4;
             continue;
@@ -3195,21 +3278,20 @@ bool Matcher::Run(int startPos)
         case OP_REP: {
             int mode = code[pc + 1], mn = code[pc + 2], mx = code[pc + 3];
             int aop = code[pc + 4], arg = code[pc + 5];
-            int cnt = 0, lim = n - pos;
+            int cnt = 0, q = ScanAtoms(m_prog, aop, arg, s, pos, n, mn, &cnt);   /* cnt characters from pos to q */
+            if (cnt < mn) goto fail;
             if (mode == REP_LAZY) {
-                if (lim < mn) goto fail;
-                while (cnt < mn && AtomMatch(m_prog, aop, arg, s, pos + cnt, n)) ++cnt;
-                if (cnt < mn) goto fail;
-                pos += cnt;
+                pos = q;
                 if (mx < 0 || mx > mn) PushBt(BT_LAZY, pc, pos, mn);
                 pc += 6;
                 continue;
             }
-            if (mx >= 0 && mx < lim) lim = mx;
-            while (cnt < lim && AtomMatch(m_prog, aop, arg, s, pos + cnt, n)) ++cnt;
-            if (cnt < mn) goto fail;
-            if (mode == REP_GREEDY && cnt > mn) PushBt(BT_GREEDY, pc + 6, pos + mn, pos + cnt - 1);
-            pos += cnt;
+            {
+                int minEnd = q;   /* where the mandatory part ends: greedy gives back down to here */
+                q = ScanAtoms(m_prog, aop, arg, s, q, n, mx < 0 ? -1 : mx - mn, &cnt);
+                if (mode == REP_GREEDY && q > minEnd) PushBt(BT_GREEDY, pc + 6, minEnd, q - PrevLen(s, q));
+            }
+            pos = q;
             pc += 6;
             continue;
         }
@@ -3334,19 +3416,20 @@ bool Matcher::Run(int startPos)
                 pos = e.b;
                 stk.Pop();
                 goto resume;
-            case BT_GREEDY:
+            case BT_GREEDY:   /* give back one character at a time */
                 pc = e.a;
                 pos = e.c;
-                if (e.c > e.b) --e.c; else stk.Pop();
+                if (e.c > e.b) e.c -= PrevLen(s, e.c); else stk.Pop();
                 goto resume;
             case BT_LAZY: {
                 int rp = e.a;
                 int mx = code[rp + 3];
-                if ((mx >= 0 && e.c >= mx) || e.b >= n || !AtomMatch(m_prog, code[rp + 4], code[rp + 5], s, e.b, n)) {
+                int len = 0;
+                if ((mx >= 0 && e.c >= mx) || e.b >= n || (len = AtomLen(m_prog, code[rp + 4], code[rp + 5], s, e.b, n)) == 0) {
                     stk.Pop();
                     continue;
                 }
-                pos = e.b + 1;
+                pos = e.b + len;
                 pc = rp + 6;
                 ++e.c;
                 if (mx >= 0 && e.c >= mx) stk.Pop(); else e.b = pos;
@@ -3366,11 +3449,14 @@ bool Matcher::Run(int startPos)
                 }
                 stk.Pop();
                 continue;
-            case BT_LB:
-                pc = e.a;
-                pos = e.b;
+            case BT_LB: {
+                int cand = e.b, target = e.a;
                 if (e.b > e.c) --e.b; else stk.Pop();
+                if (IsMidPair(s, n, cand)) continue;   /* the body cannot start inside a surrogate pair */
+                pc = target;
+                pos = cand;
                 goto resume;
+            }
             default:
                 stk.Pop();
                 continue;
@@ -3390,10 +3476,19 @@ bool Matcher::Search(int from)
             while (p < m_n && (Cp)m_s[p] != (Cp)m_prog.firstChar) ++p;
             if (p >= m_n) return false;
         }
-        if (Run(p)) return true;
-        if (m_verb == VERB_COMMIT || m_prog.anchored) return false;
-        if (m_verb == VERB_SKIP && m_verbPos > p) p = m_verbPos;
-        else ++p;
+        if (p == from || !IsMidPair(m_s, m_n, p)) {   /* a match never starts inside a surrogate pair */
+            if (Run(p)) return true;
+            if (m_verb == VERB_COMMIT || m_prog.anchored) return false;
+        }
+        if (m_verb == VERB_SKIP && m_verbPos > p) {
+            p = m_verbPos;
+        } else if (p < m_n) {
+            int len;
+            DecodeAt(m_s, m_n, p, len);
+            p += len;
+        } else {
+            ++p;
+        }
         if (p > m_n) return false;
     }
 }
