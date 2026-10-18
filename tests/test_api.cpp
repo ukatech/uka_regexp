@@ -372,6 +372,29 @@ static void TestReplaceCount()
     CHECK(CRegexpW(L"x*").Replace(L"abc", -1, L"-", out, 2) == 2 && wcscmp(out.c_str(), L"-a-bc") == 0);   // empty matches advance
 }
 
+// \K inside an assertion is an error (as PCRE2 10.38+); one reached through a subroutine call
+// must still give start <= end so that GLOBAL iteration advances
+static void TestKeepInAssertion()
+{
+    static const wchar_t* const bad[] = { L"(?=a\K)", L"(?<=a\K)", L"(?!a\K)", L"(?<!a\K)", L"(*pla:a\K)" };
+    int i, count = 0, prevEnd = 0;
+    bool thrown;
+    for (i = 0; i < (int)(sizeof(bad) / sizeof(bad[0])); ++i) {
+        thrown = false;
+        try { CRegexpW re(bad[i]); } catch (CRegexpException& e) { thrown = e.GetCode() == CRegexpException::ERR_SYNTAX; }
+        CHECK(thrown);
+    }
+
+    CRegexpW re(L"(?=(?&k))a(?(DEFINE)(?<k>a\K))", CRegexpW::GLOBAL);
+    CRegexpContext ctx;
+    while (count < 10 && re.Match(L"aa", 2, ctx)) {
+        CHECK(ctx.GetStart(0) <= ctx.GetEnd(0) && ctx.GetStart(0) >= prevEnd);
+        prevEnd = ctx.GetEnd(0);
+        ++count;
+    }
+    CHECK(count > 0 && count < 10);
+}
+
 #define RUN(t) do { try { t(); } catch (CRegexpException& e) { ++g_failed; printf("FAIL: %s threw: %s\n", #t, e.what()); } } while (0)
 
 int main()
@@ -384,6 +407,7 @@ int main()
     RUN(TestDollar);
     RUN(TestResolver);
     RUN(TestErrors);
+    RUN(TestKeepInAssertion);
     RUN(TestLimits);
     RUN(TestLongInput);
     printf("%d checks, %d failed\n", g_total, g_failed);

@@ -97,6 +97,16 @@ g	x*	ab	0-0;1-1;2-2
 g	\d*	a12	0-0;1-3;3-3
 g	a\Kb	abab	1-2;3-4
 	foo\Kbar	foobar	3-6
+	(?=a\K)	a	ERR
+	(?<=a\K)b	ab	ERR
+	(?!a\K)b	b	ERR
+	(?<!a\K)b	b	ERR
+	(?(?=a\K)a|b)	a	ERR
+	(*pla:a\K)a	a	ERR
+	(?>a\K)b	ab	1-2
+	(?=a)\Ka	a	0-1
+	(?<=a)\Kb	ab	1-2
+	(?:(?=a)\K|b)	b	0-1
 	a*+a	aaa	NOMATCH
 	(?>a+)b	aaab	0-4
 	(?:a|ab)++c	abc	NOMATCH

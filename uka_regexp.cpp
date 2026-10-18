@@ -1807,7 +1807,9 @@ int Compiler::ParseEscape()
     case 'Z': return NewNode(N_ASSERT, OP_EOSNL);
     case 'z': return NewNode(N_ASSERT, OP_EOS);
     case 'G': return NewNode(N_ASSERT, OP_GPOS);
-    case 'K': return NewNode(N_KEEP);
+    case 'K':
+        if (m_look > 0) Error("\\K is not supported inside assertions", m_pos - 2);   /* as PCRE2 10.38+ */
+        return NewNode(N_KEEP);
     case 'R': return NewNode(N_BSR);
     case 'X': return NewNode(N_GRAPHEME);
     case 'C':
@@ -2893,6 +2895,8 @@ bool Matcher::Run(int startPos)
         case OP_MATCH: {
             int ms = st[0];
             if (st[m_kpos] >= 0) ms = st[m_kpos];
+            if (ms > pos) ms = pos;   /* a \K reached through a subroutine call from an assertion */
+            if (ms < startPos) ms = startPos;
             if (m_notEmptyAt >= 0 && ms == m_notEmptyAt && pos == m_notEmptyAt) goto fail;
             if (m_prog.notEmpty == 1 && ms == pos) goto fail;
             if (m_exact && pos != n) goto fail;
