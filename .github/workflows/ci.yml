@@ -1,0 +1,84 @@
+name: ci
+
+# push / PR で自動実行。Actions タブの "Run workflow" からも手動で回せる
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # C++98 のまま g++ / clang でビルドし、警告ゼロとテストの合格を確かめる
+  build-test:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux g++",     os: ubuntu-latest, cxx: g++ }
+          - { name: "Linux clang++", os: ubuntu-latest, cxx: clang++ }
+          - { name: "macOS clang++", os: macos-latest,  cxx: clang++ }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compiler version
+        run: ${{ matrix.cxx }} --version
+
+      # 本体は警告ゼロを保つ（テスト側の警告は対象外）
+      - name: Build the engine with -Werror
+        run: ${{ matrix.cxx }} -std=c++98 -Wall -Wextra -pedantic -Werror -O2 -c uka_regexp.cpp -o /dev/null
+
+      - name: Build and run the tests
+        run: make test CXX=${{ matrix.cxx }}
+
+  # ASan + UBSan 付きで同じテストと、ランダムパターンを流す
+  sanitize:
+    name: Sanitizers (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: "Linux g++",     os: ubuntu-latest, cxx: g++,     leaks: 1 }
+          - { name: "Linux clang++", os: ubuntu-latest, cxx: clang++, leaks: 1 }
+          # macOS の ASan は LeakSanitizer 非対応
+          - { name: "macOS clang++", os: macos-latest,  cxx: clang++, leaks: 0 }
+    env:
+      SAN_FLAGS: -std=c++98 -g -O1 -fno-omit-frame-pointer -fsanitize=address,undefined -fno-sanitize-recover=all
+      ASAN_OPTIONS: detect_leaks=${{ matrix.leaks }}:strict_string_checks=1
+      UBSAN_OPTIONS: print_stacktrace=1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run the tests
+        run: make test BUILD=build/san CXX=${{ matrix.cxx }} CXXFLAGS="$SAN_FLAGS"
+
+      # 結果の比較はしない。クラッシュや未定義動作が起きないことだけを見る
+      - name: Random patterns
+        run: |
+          for seed in 1 2 3 4 5; do
+            python3 tests/fuzz_gen.py "$seed" 3000 > fuzz.txt
+            build/san/run_cases fuzz.txt > /dev/null
+          done
+
+  # Perl との突き合わせ。既知の差分（tests/perl_known_diffs.txt）は Perl の版や Unicode の版で
+  # 変わりうるので、失敗しても全体は赤にしない（結果はログで確認する）
+  compare-perl:
+    name: Compare with Perl
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Perl version
+        run: perl -v | head -2
+
+      - name: make compare-perl
+        run: make compare-perl

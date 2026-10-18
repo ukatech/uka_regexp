@@ -129,4 +129,14 @@ make compare-perl    # Perl 5.30 以降があれば、tests/cases_perl.txt を P
 - `tests/fuzz_gen.py` … Perl と比べるランダムパターンの生成器（`python3 tests/fuzz_gen.py SEED COUNT > file`）。`python3 tests/fuzz_compare.py build/run_cases file` で Perl と比べます（Perl が終わらないケースは飛ばし、グループ 0 の範囲だけを比べます）。
 - Unicode のデータ（一般カテゴリ・大文字小文字変換・スクリプト・書記素の分類・二値プロパティ）は `uka_regexp.cpp` の末尾に埋め込んであり、`make unicode-tables`（`tools/gen_unicode_tables.py`）で作り直せます。カテゴリと大文字小文字は Python の `unicodedata` から、それ以外は unicode.org の UCD ファイルから取得します（`tools/ucd/` にキャッシュ、`python3 tools/gen_unicode_tables.py DIR` で取得済みのディレクトリも指定できます）。
 
+### CI（GitHub Actions）
+
+`.github/workflows/ci.yml` が push・プルリクエスト・手動実行で次を行います。
+
+- **build-test**: Linux（g++・clang++）と macOS（clang++）で、本体を `-std=c++98 -Wall -Wextra -pedantic -Werror` でビルドし、`make test` を実行
+- **sanitize**: 同じ 3 環境で `-fsanitize=address,undefined` を付けて `make test` と `fuzz_gen.py` のランダムパターンを実行（結果は比べず、クラッシュと未定義動作だけを見る）。手元でも `make test BUILD=build/san CXXFLAGS="-std=c++98 -g -O1 -fsanitize=address,undefined -fno-sanitize-recover=all"` で同じことができる
+- **compare-perl**: Ubuntu の Perl で `make compare-perl`。既知の差分は Perl や Unicode の版で変わりうるため、失敗しても全体は赤にしない
+
+Linux・macOS の `wchar_t` は 32 bit です。16 bit の確認は Windows（MinGW・MSVC）で行ってください。
+
 ライセンスは `LICENSE` を参照してください。

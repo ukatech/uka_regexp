@@ -176,7 +176,7 @@ static bool CompileFails(const wchar_t* pat, CRegexpResolveProc proc, ResolveLog
         CRegexpW re(pat, 0, proc, log);
     } catch (CRegexpException& e) {
         if (pos) *pos = e.GetPosition();
-        if (msg) { strncpy(msg, e.what(), 95); msg[95] = 0; }
+        if (msg) { const char* w = e.what(); int k; for (k = 0; k < 95 && w[k]; ++k) msg[k] = w[k]; msg[k] = 0; }
         return e.GetCode() == CRegexpException::ERR_SYNTAX;
     }
     return false;
@@ -376,7 +376,7 @@ static void TestReplaceCount()
 // must still give start <= end so that GLOBAL iteration advances
 static void TestKeepInAssertion()
 {
-    static const wchar_t* const bad[] = { L"(?=a\K)", L"(?<=a\K)", L"(?!a\K)", L"(?<!a\K)", L"(*pla:a\K)" };
+    static const wchar_t* const bad[] = { L"(?=a\\K)", L"(?<=a\\K)", L"(?!a\\K)", L"(?<!a\\K)", L"(*pla:a\\K)" };
     int i, count = 0, prevEnd = 0;
     bool thrown;
     for (i = 0; i < (int)(sizeof(bad) / sizeof(bad[0])); ++i) {
@@ -385,7 +385,7 @@ static void TestKeepInAssertion()
         CHECK(thrown);
     }
 
-    CRegexpW re(L"(?=(?&k))a(?(DEFINE)(?<k>a\K))", CRegexpW::GLOBAL);
+    CRegexpW re(L"(?=(?&k))a(?(DEFINE)(?<k>a\\K))", CRegexpW::GLOBAL);
     CRegexpContext ctx;
     while (count < 10 && re.Match(L"aa", 2, ctx)) {
         CHECK(ctx.GetStart(0) <= ctx.GetEnd(0) && ctx.GetStart(0) >= prevEnd);
