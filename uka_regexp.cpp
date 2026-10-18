@@ -2747,6 +2747,7 @@ class Matcher {
 public:
     Matcher(const Program& prog, Work& w, const wchar_t* s, int n, int gpos, int notEmptyAt, unsigned long limit);
     bool Search(int from);
+    void SetExact() { m_exact = true; }   /* a match must end at the end of the subject */
     const int* Result() const { return m_w.st.Data(); }
 
 private:
@@ -2788,6 +2789,7 @@ private:
     int m_n;
     int m_gpos;
     int m_notEmptyAt;
+    bool m_exact;
     unsigned long m_limit;
     unsigned long m_steps;
     int m_stackLimit;   /* maximum number of backtrack stack entries */
@@ -2804,7 +2806,7 @@ private:
 };
 
 Matcher::Matcher(const Program& prog, Work& w, const wchar_t* s, int n, int gpos, int notEmptyAt, unsigned long limit)
-    : m_prog(prog), m_w(w), m_s(s), m_n(n), m_gpos(gpos), m_notEmptyAt(notEmptyAt),
+    : m_prog(prog), m_w(w), m_s(s), m_n(n), m_gpos(gpos), m_notEmptyAt(notEmptyAt), m_exact(false),
       m_limit(limit), m_steps(0), m_verb(0), m_verbPos(0), m_code(prog.code.Data())
 {
     int i;
@@ -2883,6 +2885,7 @@ bool Matcher::Run(int startPos)
             if (st[m_kpos] >= 0) ms = st[m_kpos];
             if (m_notEmptyAt >= 0 && ms == m_notEmptyAt && pos == m_notEmptyAt) goto fail;
             if (m_prog.notEmpty == 1 && ms == pos) goto fail;
+            if (m_exact && pos != n) goto fail;
             st[0] = ms;
             st[1] = pos;
             return true;
@@ -3259,6 +3262,7 @@ bool Matcher::Run(int startPos)
 bool Matcher::Search(int from)
 {
     int p = from;
+    if (m_exact) return Run(p);   /* only the search start is tried */
     for (;;) {
         if (m_prog.firstChar >= 0) {
             while (p < m_n && (Cp)m_s[p] != (Cp)m_prog.firstChar) ++p;
@@ -5736,6 +5740,23 @@ bool CRegexpW::Match(const wchar_t* str, CRegexpContext& ctx) const
 
 bool CRegexpW::Match(const wchar_t* str, int len, CRegexpContext& ctx, int start) const
 {
+    return MatchImpl(str, len, ctx, start, false, false);
+}
+
+bool CRegexpW::MatchExact(const wchar_t* str, CRegexpContext& ctx) const
+{
+    return MatchImpl(str, -1, ctx, 0, true, false);
+}
+
+bool CRegexpW::MatchExact(const wchar_t* str, int len, CRegexpContext& ctx) const
+{
+    return MatchImpl(str, len, ctx, 0, true, false);
+}
+
+/* exact: the match must span from start to the end of the subject.
+   forceGlobal: continue after the previous match in ctx even if GLOBAL is not set */
+bool CRegexpW::MatchImpl(const wchar_t* str, int len, CRegexpContext& ctx, int start, bool exact, bool forceGlobal) const
+{
     int from, notEmpty = -1;
     unsigned long limit;
     bool ok;
@@ -5747,7 +5768,7 @@ bool CRegexpW::Match(const wchar_t* str, int len, CRegexpContext& ctx, int start
         from = start;
     } else {
         from = 0;
-        if (m_prog->global) {
+        if (m_prog->global || forceGlobal) {
             from = ctx.m_next;
             if (ctx.m_lastEmpty) notEmpty = from;
         }
@@ -5767,6 +5788,7 @@ bool CRegexpW::Match(const wchar_t* str, int len, CRegexpContext& ctx, int start
     }
     {
         Matcher m(*m_prog, *ctx.m_work, str, len, from, notEmpty, limit);
+        if (exact) m.SetExact();
         ok = m.Search(from);
         if (ok) {
             const int* st = m.Result();
@@ -5873,24 +5895,41 @@ int CRegexpW::Replace(const wchar_t* str, const wchar_t* repl, CRegexpString& ou
 
 int CRegexpW::Replace(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out) const
 {
+    return ReplaceImpl(str, len, repl, out, m_prog && m_prog->global, -1, 0, 0);
+}
+
+int CRegexpW::Replace(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out,
+                      int maxCount, int* lastStart, int* lastEnd) const
+{
+    return ReplaceImpl(str, len, repl, out, true, maxCount, lastStart, lastEnd);
+}
+
+int CRegexpW::ReplaceImpl(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out,
+                          bool all, int maxCount, int* lastStart, int* lastEnd) const
+{
     CRegexpContext ctx;
     int last = 0, count = 0;
+    if (lastStart) *lastStart = -1;
+    if (lastEnd) *lastEnd = -1;
     if (!m_prog) throw CRegexpException(CRegexpException::ERR_NOT_COMPILED, -1, "pattern is not compiled");
     if (len < 0) len = WLen(str);
     out.clear();
-    for (;;) {
-        int ms, me;
-        bool ok = m_prog->global ? Match(str, len, ctx, -1) : Match(str, len, ctx, 0);
+    while (maxCount < 0 || count < maxCount) {
+        int ms, me, rs;
+        bool ok = MatchImpl(str, len, ctx, all ? -1 : 0, false, all);
         if (!ok) break;
         ms = ctx.GetStart(0);
         me = ctx.GetEnd(0);
         if (ms < last) ms = last;
         if (me < ms) me = ms;
         out.append(str + last, ms - last);
+        rs = out.size();
         ExpandTemplate(out, repl, str, len, ctx, *this);
+        if (lastStart) *lastStart = rs;
+        if (lastEnd) *lastEnd = out.size();
         last = me;
         ++count;
-        if (!m_prog->global) break;
+        if (!all) break;
     }
     out.append(str + last, len - last);
     return count;

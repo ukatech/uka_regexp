@@ -322,12 +322,44 @@ static void TestLongInput()
     delete[] s;
 }
 
+static void TestMatchExact()
+{
+    CRegexpContext ctx;
+    CHECK(CRegexpW(L"a+").MatchExact(L"aaa", ctx) && ctx.GetStart(0) == 0 && ctx.GetEnd(0) == 3);
+    CHECK(!CRegexpW(L"a+").MatchExact(L"aaab", ctx));
+    CHECK(!CRegexpW(L"a+").MatchExact(L"baaa", ctx));          // not searched: must start at 0
+    CHECK(CRegexpW(L"a|ab").MatchExact(L"ab", ctx));           // backtracks to the alternative that reaches the end
+    CHECK(CRegexpW(L"(a+)(b*)").MatchExact(L"aab", ctx) && ctx.GetEnd(1) == 2 && ctx.GetEnd(2) == 3);
+    CHECK(CRegexpW(L"x*").MatchExact(L"", ctx) && ctx.GetEnd(0) == 0);
+    CHECK(!CRegexpW(L"x*").MatchExact(L"y", ctx));
+    CHECK(CRegexpW(L"a.c", CRegexpW::GLOBAL).MatchExact(L"abc", ctx));   // GLOBAL is ignored
+    CHECK(CRegexpW(L"a.c", CRegexpW::GLOBAL).MatchExact(L"abc", ctx));   // ... also for the second call
+    CHECK(CRegexpW(L"b").MatchExact(L"abc", 3, ctx) == false);
+    CHECK(CRegexpW(L"abc").MatchExact(L"abcdef", 3, ctx));               // length given: the subject ends at 3
+}
+
+static void TestReplaceCount()
+{
+    CRegexpString out;
+    int rs, re;
+    CRegexpW a(L"a");
+    CHECK(a.Replace(L"aaaa", -1, L"b", out, 2) == 2 && wcscmp(out.c_str(), L"bbaa") == 0);   // not GLOBAL, but 2 are replaced
+    CHECK(a.Replace(L"aaaa", -1, L"b", out, -1) == 4 && wcscmp(out.c_str(), L"bbbb") == 0);
+    CHECK(a.Replace(L"aaaa", -1, L"b", out, 0) == 0 && wcscmp(out.c_str(), L"aaaa") == 0);
+    CHECK(a.Replace(L"xyz", -1, L"b", out, 3, &rs, &re) == 0 && rs == -1 && re == -1);
+    CHECK(a.Replace(L"xaay", -1, L"[$&]", out, -1, &rs, &re) == 2 && wcscmp(out.c_str(), L"x[a][a]y") == 0 && rs == 4 && re == 7);
+    CHECK(a.Replace(L"xaay", -1, L"Q", out, 1, &rs, &re) == 1 && wcscmp(out.c_str(), L"xQay") == 0 && rs == 1 && re == 2);
+    CHECK(CRegexpW(L"x*").Replace(L"abc", -1, L"-", out, 2) == 2 && wcscmp(out.c_str(), L"-a-bc") == 0);   // empty matches advance
+}
+
 #define RUN(t) do { try { t(); } catch (CRegexpException& e) { ++g_failed; printf("FAIL: %s threw: %s\n", #t, e.what()); } } while (0)
 
 int main()
 {
     RUN(TestReplace);
     RUN(TestMatchApi);
+    RUN(TestMatchExact);
+    RUN(TestReplaceCount);
     RUN(TestNewlineFlags);
     RUN(TestDollar);
     RUN(TestResolver);

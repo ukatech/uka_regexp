@@ -100,7 +100,9 @@ catch (CRegexpException& ex) {
 | `CRegexpW(pattern, flags)` / `Compile(pattern, flags)` | コンパイル。失敗しても（`Compile` なら）以前のパターンは保たれる |
 | `Match(str, ctx)` | NUL 終端の文字列から最初のマッチを探す |
 | `Match(str, len, ctx, start = -1)` | 長さ指定（NUL を含められる）。`start >= 0` ならその位置から探す |
+| `MatchExact(str, ctx)` / `MatchExact(str, len, ctx)` | 位置 0 から始まり、文字列の末尾で終わる一致だけを探す（末尾まで届く候補を求めてバックトラックする。`GLOBAL` は無視） |
 | `Replace(str, repl, out)` / `Replace(str, len, repl, out)` | 置換。`GLOBAL` なら全部、そうでなければ最初の 1 つ。置換数を返す |
+| `Replace(str, len, repl, out, maxCount, &lastStart, &lastEnd)` | 最大 `maxCount` 個（負なら全部）を、`GLOBAL` に関係なく置換する。`lastStart` / `lastEnd`（省略可）には、最後の置換文字列が `out` の中で占める範囲が入る（置換が無ければ -1） |
 | `GetGroupCount()` / `GetGroupNumber(name)` | グループ数（0 番を除く）／名前からの番号（無ければ -1） |
 | `SetStepLimit(base, perChar)` | バックトラック上限を変える（下記） |
 | `ctx.GetStart(g)` `GetEnd(g)` `IsMatched(g)` `GetGroupCount()` | 結果の取得。文字列そのものは位置から切り出す |

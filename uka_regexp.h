@@ -150,12 +150,27 @@ public:
     bool Match(const wchar_t* str, int len, CRegexpContext& ctx, int start = -1) const;
 
     /*
+     * Like Match(), but the match must start at offset 0 and end at the end of the subject
+     * (the engine backtracks until the whole subject is consumed).  GLOBAL is ignored.
+     */
+    bool MatchExact(const wchar_t* str, CRegexpContext& ctx) const;                    /* str is NUL terminated */
+    bool MatchExact(const wchar_t* str, int len, CRegexpContext& ctx) const;
+
+    /*
      * Replace the first match (all matches when GLOBAL is set) by repl, which may contain
      * $1 ${name} $& $` $' $+ $_ $$ .  The result replaces the contents of out.
      * Returns the number of replacements.
      */
     int Replace(const wchar_t* str, const wchar_t* repl, CRegexpString& out) const;
     int Replace(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out) const;
+
+    /*
+     * Replace at most maxCount matches, whether or not GLOBAL is set (maxCount < 0: all of them).
+     * When lastStart / lastEnd are given, they receive the span the last replacement text takes
+     * in out (both -1 if nothing was replaced).
+     */
+    int Replace(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out,
+                int maxCount, int* lastStart = 0, int* lastEnd = 0) const;
 
     /*
      * Backtrack limit per Match() call: base + perChar * length of the subject.
@@ -166,6 +181,9 @@ public:
 private:
     CRegexpW(const CRegexpW&);
     CRegexpW& operator=(const CRegexpW&);
+    bool MatchImpl(const wchar_t* str, int len, CRegexpContext& ctx, int start, bool exact, bool forceGlobal) const;
+    int ReplaceImpl(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out,
+                    bool all, int maxCount, int* lastStart, int* lastEnd) const;
 
     UkaRegexpImpl::Program* m_prog;
     unsigned long m_stepBase;
