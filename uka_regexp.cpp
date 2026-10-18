@@ -1755,12 +1755,17 @@ int Compiler::ParseKRef()
     return n;
 }
 
-/* \g1 \g-1 \g{1} \g{-1} \g{name} \g<name> \g'1' : back references */
+/*
+ * \g1 \g-1 \g{1} \g{-1} \g{name}: back references;
+ * \g<name> \g<1> \g<-1> \g'name' : subroutine calls, as in PCRE2 (resolved by the callback if undefined)
+ */
 int Compiler::ParseGRef()
 {
     int s, num, nameRef;
+    bool call = false;
     if (More() && (At(m_pos) == '{' || At(m_pos) == '<' || At(m_pos) == '\'')) {
         Cp close = (At(m_pos) == '{') ? (Cp)'}' : (At(m_pos) == '<') ? (Cp)'>' : (Cp)'\'';
+        call = (close != '}');
         ++m_pos;
         s = m_pos;
         while (More() && At(m_pos) != close) ++m_pos;
@@ -1772,6 +1777,11 @@ int Compiler::ParseGRef()
         if (More() && (At(m_pos) == '-' || At(m_pos) == '+')) ++m_pos;
         while (More() && IsDigitCp(At(m_pos))) ++m_pos;
         if (!ParseRefToken(s, m_pos - s, num, nameRef) || nameRef != 0) Error("invalid group reference after \\g", s);
+    }
+    if (call) {
+        int n = NewNode(N_CALL, num, nameRef);
+        m_nodes[n].pos = s;
+        return n;
     }
     return NewNode(N_BACKREF, num, nameRef, (m_flags & F_I) ? 1 : 0);
 }

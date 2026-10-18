@@ -191,6 +191,11 @@ static void TestResolver()
     CHECK(CRegexpW(L"^(?P>d2)-(?R<d2>)$", 0, TestResolver, &log).Match(L"12-34", ctx));
     CHECK(CRegexpW(L"^(?&loop)$", 0, TestResolver, &log).Match(L"aaa", ctx));
 
+    // \g<name> and \g'name' are subroutine calls too, \g{name} is a back reference and is never resolved
+    log.calls = 0;
+    CHECK(CRegexpW(L"^\\g<d2>-\\g'd2'$", 0, TestResolver, &log).Match(L"12-34", ctx) && log.calls == 1);
+    CHECK(CompileFails(L"\\g{d2}", TestResolver, &log));
+
     // a name the pattern defines itself is not asked for
     log.calls = 0;
     CHECK(CRegexpW(L"(?<d4>\\d\\d)(?&d4)", 0, TestResolver, &log).Match(L"1234", ctx) && log.calls == 0);
