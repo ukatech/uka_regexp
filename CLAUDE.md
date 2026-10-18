@@ -21,4 +21,4 @@ Vec/データ構造/文字集合 → `Compiler`（パーサ→構文木 `Node`�
 `-std=c++98 -Wall -Wextra -pedantic` で g++ と clang の警告ゼロを保つ。16bit wchar_t は `-fshort-wchar` で確認できる。
 
 ## 仕様上の決め事（変えると互換が崩れる。PCRE2 と違う点は元の要件で決まっていたもの）
-行区切りは既定で LF のみ／`\d\w\s\b` は ASCII／IGNORECASE は Unicode 単純 case folding／同名グループは同番号／後読みは短い候補から／上限超過は `ERR_STEP_LIMIT`。
+行区切りは既定で LF のみ／`\d\w\s\b` は既定で ASCII（`UNICODE` フラグか `(*UCP)` で Unicode）／IGNORECASE は Unicode 単純 case folding／同名グループは同番号／後読みは短い候補から／上限超過は `ERR_STEP_LIMIT`。

@@ -25,7 +25,7 @@ while (my $l = <$fh>) {
     my ($flags, $pat, $subj) = @c;
     $pat =~ s/<LF>/\n/g;
     $subj = decode_subject($subj);
-    my $mods = 'a';
+    my $mods = ($flags =~ /u/) ? 'u' : 'a';   # u = UNICODE: \d \w \s  follow Unicode
     my $all = 0;
     for my $f (split //, $flags) {
         if ($f eq 'g') { $all = 1 } elsif ($f =~ /^[imsx]$/) { $mods .= $f }

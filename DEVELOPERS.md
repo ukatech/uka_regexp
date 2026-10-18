@@ -57,6 +57,7 @@ catch (CRegexpException& ex) {
 | `GLOBAL`     | `(?g)` | `Match()` が前回の続きから探す／`Replace()` が全部置換する |
 | `NEWLINE_CR` `NEWLINE_CRLF` `NEWLINE_ANYCRLF` `NEWLINE_ANY` | `(*CR)` など（パターンの先頭） | 改行とみなすもの。既定は LF のみ |
 | `BSR_ANYCRLF` | `(*BSR_ANYCRLF)` | `\R` を CR・LF・CRLF だけにする |
+| `UNICODE` | `(*UCP)`（パターンの先頭） | `\d` `\w` `\s` `\b` と POSIX クラスを Unicode のプロパティで判定する（PCRE2 の `PCRE2_UCP`）。既定は OFF（ASCII だけ） |
 | `DOLLAR_ENDONLY` | （なし） | `MULTILINE` なしの `$` を、文字列の末尾だけに一致させる（`MULTILINE` と一緒のときは無視。PCRE2 の `PCRE2_DOLLAR_ENDONLY`） |
 
 フラグとパターン内の指定を両方使ったときは、パターン内の指定が、書いた位置から先で上書きします。

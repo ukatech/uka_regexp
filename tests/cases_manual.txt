@@ -17,8 +17,13 @@
 	\x{1F600}	😀	0-1
 	\u12	u12	0-3
 	\x41\x{42}	AB	0-2
-	a{,3}	a{,3}	0-5
-	a{,3}	aaa	NOMATCH
+	a{,3}	a{,3}	0-1
+	a{,3}	aaaaa	0-3
+	a{,3}?	aaa	0-0
+	a{,}	a{,}	0-4
+	a{,x}	a{,x}	0-5
+	a{ ,3}	a{ ,3}	0-6
+	a{,3}+a	aaa	NOMATCH
 	a{1	a{1	0-3
 	^abc$	abc\n	0-3
 	abc\Z	abc\n	0-3
@@ -151,7 +156,7 @@ m	(*ANY)a$	a\x{2028}b	0-1
 m	(*CRLF)^.*$	x\r\ny	0-1
 	(*LF)(*CRLF)a.b	a\rb	0-3
 	(*UTF8)(*CRLF)a	a	0-1
-	(*UCP)a	a	ERR
+	(*UCP)a	a	0-1
 	a(*CRLF)	a	ERR
 	(*NUL)a	a	ERR
 	(*BSR_ANYCRLF)\R	\x{2028}	NOMATCH
@@ -250,3 +255,39 @@ m	abc$	abc\nd	0-3
 	\g<>	a	ERR
 	^(\((?:[^()]|\g<1>)*\))$	(a(b)c)	0-7 0-7
 i	(a)\g<1>	aA	0-2 0-1
+
+# (*UCP) / UNICODE: \d \w \s \b and POSIX classes follow Unicode properties
+	\d+	１２３	NOMATCH
+	(*UCP)\d+	１２３٤	0-4
+	(*UTF8)(*UCP)\d+	１２	0-2
+u	\d+	１２３	0-3
+u	\D	１a	1-2
+u	\w+	あa_1é!	0-5
+	\w+	あa_1é!	1-4
+u	\W+	あ!? a	1-4
+u	\s+	a\x{3000}\x{a0}b	1-3
+	\s+	a\x{3000}b	NOMATCH
+u	\S+	 \x{3000}ab 	2-4
+u	\bあ	x あ	2-3
+u	a\b	aあ	NOMATCH
+u	\Ba	あa	1-2
+	a\b	aあ	0-1
+u	[\d\s]+	１ \x{3000}2a	0-4
+u	[^\w]+	a あ	1-2
+u	[[:alpha:]]+	abcあいう1	0-6
+	[[:alpha:]]+	abcあいう1	0-3
+u	[[:alnum:]]+	abcあ1!	0-5
+u	[[:digit:]]+	１２3	0-3
+u	[[:upper:]]+	abÄÖcd	2-4
+u	[[:lower:]]+	ABäöCD	2-4
+ui	[[:lower:]]+	ABäöCD	0-6
+u	[[:space:]]+	a\x{3000}b	1-2
+u	[[:word:]]+	!あa_!	1-4
+u	[[:punct:]]+	a。「$+b	1-5
+	[[:punct:]]+	a。「$+b	3-5
+u	[[:graph:]]+	 あ1\x{3000}	1-3
+u	[[:print:]]+	\x{1}a\x{3000}あ\x{1}	1-4
+u	[[:blank:]]+	a\x{3000}\t b	1-4
+u	[[:^alpha:]]+	あ1!い	1-3
+u	[[:xdigit:]]+	ａ1f	1-3
+u	[[:ascii:]]+	あaい	1-2

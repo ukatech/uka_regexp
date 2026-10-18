@@ -9,7 +9,7 @@
 	a{2}	aaa
 	a{2,}	aaaa
 	a{2,3}	aaaa
-	a{,3}	a{,3}
+	a{0,3}	aaaa
 	x{1,2}y	xxxy
 	(a)(b)?	ac
 	(a)|(b)	b
@@ -640,3 +640,32 @@ gm	$	a\nb\n
 gm	^	\n\n
 gm	^$	a\n\nb
 m	^	a\n
+u	\d+	１２３
+u	\D	１a
+u	\w+	あa_1é!
+u	\W+	あ!? a
+u	\s+	a\x{3000}\x{a0}b
+u	\S+	 \x{3000}ab 
+u	\bあ	x あ
+u	a\b	aあ
+u	\Ba	あa
+u	[\d\s]+	１ \x{3000}2a
+u	[^\w]+	a あ
+u	[[:alpha:]]+	abcあいう1
+u	[[:alnum:]]+	abcあ1!
+u	[[:digit:]]+	１２3
+u	[[:upper:]]+	abÄÖcd
+u	[[:lower:]]+	ABäöCD
+ui	[[:lower:]]+	ABäöCD
+u	[[:space:]]+	a\x{3000}b
+u	[[:word:]]+	!あa_!
+u	[[:punct:]]+	a。「$+b
+u	[[:graph:]]+	 あ1\x{3000}
+u	[[:print:]]+	\x{1}a\x{3000}あ\x{1}
+u	[[:blank:]]+	a\x{3000}\t b
+u	[[:^alpha:]]+	あ1!い
+u	[[:xdigit:]]+	ａ1f
+u	[[:ascii:]]+	あaい
+	a{,3}	aaaaa
+	a{,3}?	aaa
+	a{,3}+a	aaa

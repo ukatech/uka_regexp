@@ -397,6 +397,27 @@ static void TestKeepInAssertion()
 
 #define RUN(t) do { try { t(); } catch (CRegexpException& e) { ++g_failed; printf("FAIL: %s threw: %s\n", #t, e.what()); } } while (0)
 
+static void TestUnicodeFlag()
+{
+    CRegexpContext ctx;
+    {
+        CRegexpW off(L"\\d+\\w+");   // off by default: ASCII only
+        CHECK(!off.Match(L"１２あ", ctx));
+    }
+    {
+        CRegexpW on(L"\\d+\\w+", CRegexpW::UNICODE);
+        CHECK(on.Match(L"１２あ", ctx) && ctx.GetStart(0) == 0 && ctx.GetEnd(0) == 3);
+    }
+    {
+        CRegexpW verb(L"(*UCP)\\bx\\u3042");
+        CHECK(!verb.Match(L"あxあ", ctx));
+        CHECK(verb.Match(L"あ xあ", ctx));
+    }
+    CHECK(Repl(L"\\s", CRegexpW::UNICODE | CRegexpW::GLOBAL, L"a　b c", L"_", L"a_b_c", 2));
+    CHECK(Repl(L"\\s", CRegexpW::GLOBAL, L"a　b c", L"_", L"a　b_c", 1));
+    CHECK(Repl(L"a{,2}", CRegexpW::GLOBAL, L"aaa", L"-", L"---", 3));   // a{,2} is a{0,2}
+}
+
 int main()
 {
     RUN(TestReplace);
@@ -408,6 +429,7 @@ int main()
     RUN(TestResolver);
     RUN(TestErrors);
     RUN(TestKeepInAssertion);
+    RUN(TestUnicodeFlag);
     RUN(TestLimits);
     RUN(TestLongInput);
     printf("%d checks, %d failed\n", g_total, g_failed);

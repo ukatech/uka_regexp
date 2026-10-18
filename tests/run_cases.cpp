@@ -4,7 +4,7 @@
 //   run_cases --verify FILE   compare with the 4th column of every case, report mismatches, exit 1 on any
 //
 // Case line (tab separated):  flags <TAB> pattern <TAB> subject [<TAB> expected]
-//   flags   i m s x = IGNORECASE MULTILINE SINGLELINE EXTENDED, g = GLOBAL (report every match)
+//   flags   i m s x u = IGNORECASE MULTILINE SINGLELINE EXTENDED UNICODE, g = GLOBAL (report every match)
 //   pattern the regular expression, "<LF>" stands for a line feed
 //   subject the subject; \n \t \r \\ \xHH \x{H..} are decoded
 //   result  per match "s-e" for every group (group 0 first, "-" if unmatched) separated by blanks;
@@ -111,6 +111,7 @@ static std::string RunCase(const std::string& flags, const std::string& pat, con
         case 'm': f |= CRegexpW::MULTILINE; break;
         case 's': f |= CRegexpW::SINGLELINE; break;
         case 'x': f |= CRegexpW::EXTENDED; break;
+        case 'u': f |= CRegexpW::UNICODE; break;
         case 'g': all = true; f |= CRegexpW::GLOBAL; break;
         default: break;
         }

@@ -188,6 +188,7 @@ enum {
     OP_CLASS,         /* class index */
     OP_BOL, OP_MBOL, OP_EOL, OP_MEOL, OP_BOS, OP_EOS, OP_EOSNL,
     OP_WORDB, OP_NWORDB, OP_GPOS,
+    OP_UWORDB, OP_UNWORDB,   /* \b \B with (*UCP) */
     OP_KEEP,          /* \K */
     OP_JMP,           /* target */
     OP_SPLIT,         /* first, second: try first, remember second */
@@ -269,10 +270,11 @@ struct Program {
     int bsrAnyCrlf;           /* \R only matches CR, LF and CRLF */
     int notEmpty;             /* 1: never return an empty match; 2: not an empty match at the search start */
     int dollarEndOnly;        /* $ only matches at the very end (DOLLAR_ENDONLY) */
+    int ucp;                  /* \d \w \s \b and POSIX classes use Unicode properties (UNICODE, (*UCP)) */
     unsigned long limitMatch; /* (*LIMIT_MATCH=n), 0: none */
 
     Program() : ngroups(0), nloops(0), global(0), anchored(0), firstChar(-1),
-                newline(0), bsrAnyCrlf(0), notEmpty(0), dollarEndOnly(0), limitMatch(0) {}
+                newline(0), bsrAnyCrlf(0), notEmpty(0), dollarEndOnly(0), ucp(0), limitMatch(0) {}
 private:
     Program(const Program&);
     Program& operator=(const Program&);
@@ -334,7 +336,10 @@ enum {
     EX_WHITE = 2,        /* Unicode White_Space */
     EX_JOIN = 4,         /* U+200C, U+200D */
     EX_UNDERSCORE = 8,
-    EX_PSP = 16          /* TAB, LF, VT, FF, CR */
+    EX_PSP = 16,         /* TAB, LF, VT, FF, CR */
+    EX_GRAPH = 32,       /* [:graph:] with (*UCP) */
+    EX_PRINT = 64,       /* [:print:] with (*UCP) */
+    EX_PUNCT = 128       /* [:punct:] with (*UCP) */
 };
 
 #define CATBIT(c) (1u << (c))
@@ -386,6 +391,13 @@ static bool IsUniWhite(Cp c)
            c == 0x205F || c == 0x3000;
 }
 
+/* [:graph:] with (*UCP): L M N P S and Cf, except three characters that PCRE2 leaves out */
+static bool IsUcpGraph(Cp c)
+{
+    if (c == 0x061C || c == 0x180E || (c >= 0x2066 && c <= 0x2069)) return false;
+    return (((MASK_L | MASK_M | MASK_N | MASK_P | MASK_S | CATBIT(CAT_Cf)) >> UcCategory(c)) & 1u) != 0;
+}
+
 static bool PropMatch(const ClassProp& p, Cp c)
 {
     bool r = false;
@@ -401,8 +413,60 @@ static bool PropMatch(const ClassProp& p, Cp c)
         else if ((p.extra & EX_JOIN) && (c == 0x200C || c == 0x200D)) r = true;
         else if ((p.extra & EX_UNDERSCORE) && c == '_') r = true;
         else if ((p.extra & EX_PSP) && c >= 9 && c <= 13) r = true;
+        else if ((p.extra & EX_GRAPH) && IsUcpGraph(c)) r = true;
+        else if ((p.extra & EX_PRINT) && (IsUcpGraph(c) || UcCategory(c) == CAT_Zs)) r = true;
+        else if ((p.extra & EX_PUNCT) && (((MASK_P >> UcCategory(c)) & 1u) || (c < 256 && ((MASK_S >> UcCategory(c)) & 1u)))) r = true;
     }
     return r != (p.neg != 0);
+}
+
+static ClassProp MakeProp(unsigned int mask, unsigned int extra, bool neg)
+{
+    ClassProp p;
+    p.mask = mask;
+    p.extra = extra;
+    p.neg = neg ? 1 : 0;
+    p.script = -1;
+    p.scx = 0;
+    p.bin = -1;
+    return p;
+}
+
+/* \d \D \w \W \s \S with (*UCP): c is the letter after the backslash */
+static bool UcpShorthand(Cp c, ClassProp& p)
+{
+    switch (c) {
+    case 'd': p = MakeProp(CATBIT(CAT_Nd), 0, false); return true;
+    case 'D': p = MakeProp(CATBIT(CAT_Nd), 0, true); return true;
+    case 'w': p = MakeProp(MASK_L | MASK_N, EX_UNDERSCORE, false); return true;
+    case 'W': p = MakeProp(MASK_L | MASK_N, EX_UNDERSCORE, true); return true;
+    case 's': p = MakeProp(MASK_Z, EX_PSP, false); return true;
+    case 'S': p = MakeProp(MASK_Z, EX_PSP, true); return true;
+    default: return false;
+    }
+}
+
+static bool EqAscii(const wchar_t* w, int n, const char* a);
+
+struct UcpPosixDef { const char* name; unsigned int mask; unsigned int extra; };
+
+/* POSIX class names with (*UCP); false for the ones that stay ASCII (ascii, xdigit) or become \h (blank) */
+static bool UcpPosix(const wchar_t* w, int n, bool neg, ClassProp& p)
+{
+    static const UcpPosixDef kUcpPosix[] = {
+        { "alnum", MASK_L | MASK_N, 0 }, { "alpha", MASK_L, 0 }, { "cntrl", CATBIT(CAT_Cc), 0 },
+        { "digit", CATBIT(CAT_Nd), 0 }, { "lower", CATBIT(CAT_Ll), 0 }, { "upper", CATBIT(CAT_Lu), 0 },
+        { "space", MASK_Z, EX_PSP }, { "word", MASK_L | MASK_N, EX_UNDERSCORE },
+        { "graph", 0, EX_GRAPH }, { "print", 0, EX_PRINT }, { "punct", 0, EX_PUNCT }
+    };
+    int i;
+    for (i = 0; i < ARRAY_COUNT(kUcpPosix); ++i) {
+        if (EqAscii(w, n, kUcpPosix[i].name)) {
+            p = MakeProp(kUcpPosix[i].mask, kUcpPosix[i].extra, neg);
+            return true;
+        }
+    }
+    return false;
 }
 
 static int CmpRange(const void* a, const void* b)
@@ -657,6 +721,7 @@ public:
         if (prog.newline > NL_ANY) prog.newline = NL_LF;
         prog.bsrAnyCrlf = (flags & 256u) ? 1 : 0;
         prog.dollarEndOnly = (flags & 512u) ? 1 : 0;
+        prog.ucp = (flags & 1024u) ? 1 : 0;
     }
     void Run();
 
@@ -902,7 +967,10 @@ bool Compiler::ReadQuantifier(int& mn, int& mx)
             ++p;
             ++digits;
         }
-        if (digits == 0) return false;
+        if (digits == 0 && !(p < m_len && At(p) == ',')) return false;
+        if (digits == 0) {   /* {,m} is {0,m}, as in PCRE2 10.43 */
+            if (!(p + 1 < m_len && IsDigitCp(At(p + 1)))) return false;
+        }
         if (p < m_len && At(p) == '}') {
             m = n;
         } else if (p < m_len && At(p) == ',') {
@@ -1483,7 +1551,7 @@ void Compiler::ParseStartVerbs()
             EqAscii(m_p + ns, nl, "LIMIT_HEAP") || EqAscii(m_p + ns, nl, "LIMIT_RECURSION")) {
             /* nothing to do: wchar_t is always Unicode, and these only tune PCRE's optimiser and limits */
         } else if (EqAscii(m_p + ns, nl, "UCP")) {
-            Error("(*UCP) is not supported");
+            m_prog.ucp = 1;
         } else if (EqAscii(m_p + ns, nl, "NUL")) {
             Error("(*NUL) is not supported");
         } else if (EqAscii(m_p + ns, nl, "LF")) { m_prog.newline = NL_LF;
@@ -1792,6 +1860,14 @@ int Compiler::ParseEscape()
     if (m_pos + 1 >= m_len) Error("\\ at end of pattern");
     c = At(m_pos + 1);
     m_pos += 2;
+    if (m_prog.ucp) {
+        ClassProp up;
+        if (UcpShorthand(c, up)) {
+            ClassBuilder cb;
+            cb.props.Push(up);
+            return NewNode(N_CLASS, FinishClass(m_prog, cb));
+        }
+    }
     switch (c) {
     case 'd': return SetNode(kDigit, ARRAY_COUNT(kDigit), false);
     case 'D': return SetNode(kDigit, ARRAY_COUNT(kDigit), true);
@@ -1801,8 +1877,8 @@ int Compiler::ParseEscape()
     case 'S': return SetNode(kSpace, ARRAY_COUNT(kSpace), true);
     case 'h': return SetNode(kHSpace, ARRAY_COUNT(kHSpace), false);
     case 'H': return SetNode(kHSpace, ARRAY_COUNT(kHSpace), true);
-    case 'b': return NewNode(N_ASSERT, OP_WORDB);
-    case 'B': return NewNode(N_ASSERT, OP_NWORDB);
+    case 'b': return NewNode(N_ASSERT, m_prog.ucp ? OP_UWORDB : OP_WORDB);
+    case 'B': return NewNode(N_ASSERT, m_prog.ucp ? OP_UNWORDB : OP_NWORDB);
     case 'A': return NewNode(N_ASSERT, OP_BOS);
     case 'Z': return NewNode(N_ASSERT, OP_EOSNL);
     case 'z': return NewNode(N_ASSERT, OP_EOS);
@@ -1892,6 +1968,19 @@ int Compiler::ReadClassItem(ClassBuilder& cb, Cp& ch)
                 if (EqAscii(m_p + s, p - s, kPosix[i].name)) { found = i; break; }
             }
             if (found < 0) Error("unknown POSIX class name", s);
+            if (m_prog.ucp) {
+                ClassProp up;
+                if (UcpPosix(m_p + s, p - s, neg, up)) {
+                    cb.props.Push(up);
+                    m_pos = p + 2;
+                    return 1;
+                }
+                if (EqAscii(m_p + s, p - s, "blank")) {
+                    AddSet(cb.esc, kHSpace, ARRAY_COUNT(kHSpace), neg);
+                    m_pos = p + 2;
+                    return 1;
+                }
+            }
             AddSet(kPosix[found].caseSensitive ? cb.lit : cb.esc, kPosix[found].r, kPosix[found].n, neg);
             m_pos = p + 2;
             return 1;
@@ -1905,6 +1994,13 @@ int Compiler::ReadClassItem(ClassBuilder& cb, Cp& ch)
     if (m_pos + 1 >= m_len) Error("\\ at end of pattern");
     c = At(m_pos + 1);
     m_pos += 2;
+    if (m_prog.ucp) {
+        ClassProp up;
+        if (UcpShorthand(c, up)) {
+            cb.props.Push(up);
+            return 1;
+        }
+    }
     switch (c) {
     case 'd': AddSet(cb.esc, kDigit, ARRAY_COUNT(kDigit), false); return 1;
     case 'D': AddSet(cb.esc, kDigit, ARRAY_COUNT(kDigit), true); return 1;
@@ -2622,6 +2718,11 @@ static inline bool IsWordCp(Cp c)
     return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_';
 }
 
+static inline bool IsUcpWordCp(Cp c)
+{
+    return c == '_' || (((MASK_L | MASK_N) >> UcCategory(c)) & 1u) != 0;
+}
+
 static inline bool IsAnyNewline(Cp c)
 {
     return c == 10 || c == 11 || c == 12 || c == 13 || c == 0x85 || c == 0x2028 || c == 0x2029;
@@ -2942,6 +3043,13 @@ bool Matcher::Run(int startPos)
             bool before = pos > 0 && IsWordCp((Cp)s[pos - 1]);
             bool after = pos < n && IsWordCp((Cp)s[pos]);
             if ((before != after) == (code[pc] == OP_WORDB)) { ++pc; continue; }
+            goto fail;
+        }
+        case OP_UWORDB:
+        case OP_UNWORDB: {
+            bool before = pos > 0 && IsUcpWordCp((Cp)s[pos - 1]);
+            bool after = pos < n && IsUcpWordCp((Cp)s[pos]);
+            if ((before != after) == (code[pc] == OP_UWORDB)) { ++pc; continue; }
             goto fail;
         }
         case OP_GPOS:
