@@ -114,6 +114,36 @@ static void TestMatchApi()
     CHECK(CRegexpW(L"b").Replace(nul, 3, L"X", out) == 1 && out.size() == 3 && out.c_str()[2] == L'X');
 }
 
+static void TestNewlineFlags()
+{
+    CRegexpContext ctx;
+    // default: LF only
+    CHECK(CRegexpW(L"^b", CRegexpW::MULTILINE).Match(L"a\nb", ctx) && ctx.GetStart(0) == 2);
+    CHECK(!CRegexpW(L"^b", CRegexpW::MULTILINE).Match(L"a\rb", ctx));   // a lone CR is no line break
+    CHECK(CRegexpW(L"a.b").Match(L"a\rb", ctx));
+
+    // CRLF text: $ and ^ see the CRLF pair, . does not swallow the CR of a CRLF
+    CRegexpW crlf(L"^(.*)$", CRegexpW::MULTILINE | CRegexpW::NEWLINE_CRLF | CRegexpW::GLOBAL);
+    CRegexpContext c2;
+    const wchar_t* text = L"one\r\ntwo\r\nthree";
+    int ends[8], n = 0;
+    while (crlf.Match(text, c2) && n < 8) ends[n++] = c2.GetEnd(1);
+    CHECK(n == 3 && ends[0] == 3 && ends[1] == 8 && ends[2] == 15);
+
+    CRegexpString out;
+    CHECK(CRegexpW(L"^", CRegexpW::MULTILINE | CRegexpW::NEWLINE_ANYCRLF | CRegexpW::GLOBAL).Replace(L"a\rb\r\nc\nd", L"> ", out) == 4);
+    CHECK(wcscmp(out.c_str(), L"> a\r> b\r\n> c\n> d") == 0);
+
+    CHECK(CRegexpW(L"a$", CRegexpW::MULTILINE | CRegexpW::NEWLINE_ANY).Match(L"a\x2028" L"b", ctx));
+    CHECK(!CRegexpW(L"a.b", CRegexpW::NEWLINE_ANY).Match(L"a\x85" L"b", ctx));
+    CHECK(!CRegexpW(L"a.b", CRegexpW::NEWLINE_CR).Match(L"a\rb", ctx));
+    CHECK(CRegexpW(L"a.b", CRegexpW::NEWLINE_CR).Match(L"a\nb", ctx));
+    CHECK(CRegexpW(L"(*LF)a.b", CRegexpW::NEWLINE_CRLF).Match(L"a\rb", ctx) == true);   // the verb wins over the flag
+    CHECK(CRegexpW(L"\\R").Match(L"\x2028", ctx));
+    CHECK(!CRegexpW(L"\\R", CRegexpW::BSR_ANYCRLF).Match(L"\x2028", ctx));
+    CHECK(CRegexpW(L"\\R", CRegexpW::BSR_ANYCRLF).Match(L"a\r\nb", ctx) && ctx.GetEnd(0) == 3);
+}
+
 static void TestErrors()
 {
     CRegexpW re;
@@ -211,6 +241,7 @@ int main()
 {
     RUN(TestReplace);
     RUN(TestMatchApi);
+    RUN(TestNewlineFlags);
     RUN(TestErrors);
     RUN(TestLimits);
     RUN(TestLongInput);

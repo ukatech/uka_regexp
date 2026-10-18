@@ -28,7 +28,7 @@ class Gen:
         if r < 0.65:
             return rnd.choice(["[ab]", "[^a]", "[a-c]", "[^bc]", "[b ]"])
         if r < 0.75:
-            return rnd.choice(["\\w", "\\W", "\\d", "\\s", "\\D", "\\S"])
+            return rnd.choice(["\\w", "\\W", "\\d", "\\s", "\\D", "\\S", "\\N", "\\R", "\\h", "\\H"])
         if r < 0.80:
             return rnd.choice(["\\b", "\\B", "\\A", "\\z", "^"] + (["$"] if self.multiline else []))
         return rnd.choice("abc")
@@ -99,8 +99,6 @@ def subject(multiline):
     if multiline:
         alphabet += "\n\n"
     s = "".join(rnd.choice(alphabet) for _ in range(n))
-    if multiline and s.endswith("\n"):
-        s = s[:-1] + "a"
     return s.replace("\n", "\\n")
 
 

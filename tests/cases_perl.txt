@@ -547,3 +547,96 @@ g
 	\k	a
 	\k<	a
 	(?<=a*)(?<n>)\k<q>	a
+	\R	a\r\nb
+	\R+	\r\n\n\r
+	a\Rb	a\x{2028}b
+	\R	\x{85}
+	\R\n	\r\n
+	\R{2}	\r\n\n
+	\R	a\x0bb
+	\R	a\x0cb
+	\R	ab
+	\N+	ab\ncd
+s	\N+	ab\ncd
+	\N{3}	aaaa
+	\N{U+3042}	あ
+	\N{U+41}+	AAB
+	a\Nb	a\nb
+	a\Nb	axb
+	\o{101}	A
+	\o{3042}	ঈ
+	\X	e\x{301}x
+g	\X	a\r\nb
+g	\X	\x{1F468}\x{200D}\x{1F469}x
+g	\X	\x{1F1E6}\x{1F1E7}\x{1F1E8}
+g	\X	\x{1100}\x{1161}\x{11A8}x
+	\X\X	ab
+	^\X$	\x{1F468}\x{1F3FB}
+	\X+	abc
+g	\X	\n\r
+	\p{Hiragana}+	xあいうx
+	\p{Katakana}+	xアイウーx
+	\p{Han}+	日本語かな
+	\p{Latin}+	日abc
+	\p{sc=Hiragana}	ー
+	\p{scx=Hiragana}	ー
+	\p{Script=Hira}+	あい
+	\p{Script_Extensions=Kana}+	アーイ
+	\P{Hiragana}+	あxyあ
+	[\p{Hiragana}\p{Katakana}]+	xあアx
+	[^\p{Hiragana}]+	あxyあ
+	\p{Greek}+	aαβγb
+	\p{Cyrillic}+	aпривет
+	\p{Alphabetic}+	12ab!
+	\p{Emoji}	a😀
+	\p{Extended_Pictographic}	a😀
+	\p{gc=Lu}	aB
+	\p{General_Category=Lu}+	abCD
+	\p{Uppercase_Letter}+	abCD
+	\p{Letter}+	12ab
+	\p{greek}	α
+	\p{Common}+	ab 12 cd
+	\p{Inherited}	a\x{301}
+	\p{Hangul}+	a한국어b
+	\p{Thai}+	aไทยb
+i	\p{Hiragana}	あ
+	a(*FAIL)|b	ab
+	(*F)	a
+	a+(*COMMIT)b	aaac aab
+	a(*COMMIT)b|ac	ac
+	aaab(*PRUNE)|a	aaac
+	a+(*PRUNE)b	aaac aab
+	\d+(*SKIP)(*FAIL)|\w+	12ab34 cd
+g	a(*SKIP)(*FAIL)|b	abab
+g	"[^"]*"(*SKIP)(*F)|\d+	12 "34" 56
+	(?:a(*COMMIT)b|.c)	ac
+	a+(*SKIP)b|a	aaac
+g	a+(*SKIP)b|\w	aaacab
+	(?>a(*COMMIT)b|c)	ac
+	(a(*COMMIT)b)?c	ac
+	x*(*COMMIT)y	aaxy
+	(*COMMIT)x	ax
+	(*PRUNE)x	ax
+	(*pla:a)a	a
+	(*nla:a)b	b
+	(*plb:a)b	ab
+	(*nlb:a)b	cb
+	(*atomic:a+)a	aaa
+	(*positive_lookahead:a)a	a
+	(*negative_lookbehind:a)b	ab
+i	(?^)a	A
+i	(?^i:a)b	Ab
+i	(?^:a)	A
+	(?n)(a)(?<x>b)	ab
+	(?n:(a))(b)	ab
+	(?xx)[a b]+	a b
+	(?x)[a b]+	a b
+	(?(R)x|y)(?R)?	yx
+	(a(?(R1)b|c)(?1)?)	acab
+	(?<n>a(?(R&n)b|c)(?&n)?)	acab
+	(?(R)a|b)	b
+gm	^	a\nb\n
+gm	$	a\nb\n
+gm	^	\n\n
+gm	^$	a\n\nb
+m	^	a\n

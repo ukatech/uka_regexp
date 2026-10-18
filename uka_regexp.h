@@ -104,7 +104,15 @@ public:
         MULTILINE  = 2,   /* (?m) ^ and $ match at line boundaries */
         SINGLELINE = 4,   /* (?s) . matches a newline too */
         EXTENDED   = 8,   /* (?x) ignore white space and #comments in the pattern */
-        GLOBAL     = 16   /* (?g) Match() continues after the previous match, Replace() replaces all */
+        GLOBAL     = 16,  /* (?g) Match() continues after the previous match, Replace() replaces all */
+
+        /* what counts as a newline for . ^ $ \Z (like PCRE2_NEWLINE_*); the default is LF only.
+           A (*CRLF)-style verb at the start of the pattern overrides this. */
+        NEWLINE_CR      = 32,
+        NEWLINE_CRLF    = 64,
+        NEWLINE_ANYCRLF = 96,   /* CR, LF or CRLF */
+        NEWLINE_ANY     = 128,  /* CR, LF, CRLF, VT, FF, NEL, LS, PS */
+        BSR_ANYCRLF     = 256   /* \R matches only CR, LF and CRLF (default: all Unicode line breaks) */
     };
 
     CRegexpW();
