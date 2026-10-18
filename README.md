@@ -253,15 +253,18 @@ catch (CRegexpException& ex) {
 
 ### サブルーチンの外部定義（コールバックによる解決）
 
-`(?&date)` `(?P>date)` `(?R<date>)` `\g<date>` `\g'date'` のようなサブルーチン呼び出しで、パターンの中に定義が無い**名前**は、利用側が渡したコールバックでパターン文字列に解決できます。コールバックが無い、または `0` を返したときは、これまでどおり `ERR_SYNTAX` の例外です。
+`(?&date)` `(?P>date)` `(?R<date>)` `\g<date>` `\g'date'` のようなサブルーチン呼び出しで、パターンの中に定義が無い**名前**は、利用側が渡したコールバックでパターン文字列に解決できます。コールバックが無い、または `false` を返したときは、これまでどおり `ERR_SYNTAX` の例外です。
 
 ```cpp
-static const wchar_t* Resolve(const wchar_t* name, void* user)
+static bool Resolve(const wchar_t* name, CRegexpString& pattern, void* user)
 {
-    if (wcscmp(name, L"d4") == 0)   return L"\\d{4}";
-    if (wcscmp(name, L"d2") == 0)   return L"\\d\\d";
-    if (wcscmp(name, L"date") == 0) return L"(?&d4)-(?&d2)-(?&d2)";   // さらに別の名前を呼んでもよい
-    return 0;                                                          // 知らない名前はエラーになる
+    const wchar_t* text = 0;
+    if (wcscmp(name, L"d4") == 0)        text = L"\\d{4}";
+    else if (wcscmp(name, L"d2") == 0)   text = L"\\d\\d";
+    else if (wcscmp(name, L"date") == 0) text = L"(?&d4)-(?&d2)-(?&d2)";   // さらに別の名前を呼んでもよい
+    if (!text) return false;                                               // 知らない名前はエラーになる
+    pattern.append(text, (int)wcslen(text));                               // エンジンがコピーを持つ
+    return true;
 }
 
 CRegexpW re(L"^(?&date)$", 0, Resolve, /* user = */ 0);   // 呼ばれるのはコンパイル中、名前ごとに 1 回
@@ -270,7 +273,9 @@ CRegexpW re(L"^(?&date)$", 0, Resolve, /* user = */ 0);   // 呼ばれるのは�
 - 返す文字列は、**その名前のグループの中身**として取り込まれます（`(?(DEFINE)(?<名前>…))` をパターンの最後に足したのと同じ）。自分自身を呼ぶ再帰もできます。
 - 取り込まれたグループは、パターン自身のグループの**後ろ**に番号が振られます（`GetGroupCount()` に数えられ、`GetGroupNumber(名前)` で引けます）。サブルーチンの中のグループは、呼び出しから戻ると元に戻るので、結果には現れません。
 - 文字列の中のフラグは、`Compile` に渡したフラグから始まります（呼び出し側のパターンの `(?i)` などは引き継ぎません）。文字列の中が不正なら `ERR_SYNTAX`（位置は -1、メッセージにサブルーチン名が入ります）です。
-- コールバックが返した文字列は、コールバックが返った後はもう参照しません。
+- `pattern` に入れた文字列はエンジンがコピーを持つので、コールバックが返った後は参照されません（呼び出し側で保持し続ける必要はありません）。
+- 知らない名前で `false` を返したときの `ERR_SYNTAX` のメッセージには、その名前が入ります（位置は呼び出しの場所）。
+- コールバックが例外を投げると、`Compile()` はオブジェクトを変えずにその例外をそのまま伝えます。
 - 解決の対象は名前による**呼び出し**だけです。`(?1)` のような番号、`\k<name>` `\g{name}` の後方参照、`(?(name)…)` の条件は、定義が無ければエラーのままです。
 
 ### 置換文字列（`Replace`）

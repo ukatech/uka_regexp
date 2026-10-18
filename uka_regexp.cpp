@@ -2005,6 +2005,18 @@ int Compiler::ParseClass()
     }
 }
 
+/* "<prefix>'<name>'<suffix>" into a message buffer of 96 bytes (non-ASCII characters of the name become '?') */
+static void SubroutineMessage(char* msg, const char* prefix, const wchar_t* name, const char* suffix)
+{
+    int k = 0, j = 0;
+    while (prefix[k] && k < 40) { msg[k] = prefix[k]; ++k; }
+    msg[k++] = '\'';
+    while (name[j] && j < 20 && k < 70) { msg[k++] = ((Cp)name[j] < 128) ? (char)name[j] : '?'; ++j; }
+    msg[k++] = '\'';
+    for (j = 0; suffix[j] && k < 95; ++j) msg[k++] = suffix[j];
+    msg[k] = 0;
+}
+
 /* Subroutine calls to names that the pattern does not define are resolved through the callback. */
 void Compiler::ResolveExternal()
 {
@@ -2012,7 +2024,7 @@ void Compiler::ResolveExternal()
     if (!m_resolver) return;   /* the calls stay unresolved and are reported by ResolveRef() */
     for (;;) {
         int i, found = -1, nameOff, num, g, body, savedLen, savedPos;
-        const wchar_t* text;
+        CRegexpString text;   /* the pattern the resolver returns (owned here until it is parsed) */
         const wchar_t* savedP;
         unsigned int savedFlags;
         NameEnt ne;
@@ -2025,8 +2037,11 @@ void Compiler::ResolveExternal()
         if (found < 0) return;
         if (++guard > 256) Error("too many subroutines from the resolver", -1);
         nameOff = m_nodes[found].b - 1;
-        text = m_resolver(m_prog.namePool.Data() + nameOff, m_resolverUser);
-        if (!text) Error("undefined subroutine (the resolver does not know the name)", m_nodes[found].pos);
+        if (!m_resolver(m_prog.namePool.Data() + nameOff, text, m_resolverUser)) {
+            char msg[96];
+            SubroutineMessage(msg, "undefined subroutine ", m_prog.namePool.Data() + nameOff, "");
+            Error(msg, m_nodes[found].pos);
+        }
 
         num = ++m_maxGroup;   /* the subroutine becomes a named group after all other groups */
         m_counter = m_maxGroup;
@@ -2035,8 +2050,8 @@ void Compiler::ResolveExternal()
         m_prog.names.Push(ne);
 
         savedP = m_p; savedLen = m_len; savedPos = m_pos; savedFlags = m_flags;
-        m_p = text;
-        m_len = WLen(text);
+        m_p = text.c_str();
+        m_len = text.size();
         m_pos = 0;
         m_flags = m_initFlags;
         m_quote = 0;
@@ -2046,17 +2061,12 @@ void Compiler::ResolveExternal()
             body = ParseAlt(false);
             if (m_pos < m_len) Error("unmatched )");
         } catch (CRegexpException& e) {
-            char msg[96];
-            int k = 0, j = 0;
-            const wchar_t* nm = m_prog.namePool.Data() + nameOff;
-            const char* prefix = "in subroutine '";
-            while (prefix[k] && k < 40) { msg[k] = prefix[k]; ++k; }
-            while (nm[j] && j < 20 && k < 70) { msg[k++] = ((Cp)nm[j] < 128) ? (char)nm[j] : '?'; ++j; }
-            msg[k++] = '\'';
-            msg[k++] = ':';
-            msg[k++] = ' ';
-            for (j = 0; e.what()[j] && k < (int)sizeof(msg) - 1; ++j) msg[k++] = e.what()[j];
-            msg[k] = 0;
+            char msg[96], tail[64];
+            int j;
+            tail[0] = ':'; tail[1] = ' ';
+            for (j = 0; e.what()[j] && j < 60; ++j) tail[2 + j] = e.what()[j];
+            tail[2 + j] = 0;
+            SubroutineMessage(msg, "in subroutine ", m_prog.namePool.Data() + nameOff, tail);
             throw CRegexpException(CRegexpException::ERR_SYNTAX, -1, msg);
         }
         m_p = savedP; m_len = savedLen; m_pos = savedPos; m_flags = savedFlags;

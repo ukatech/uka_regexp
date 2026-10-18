@@ -146,9 +146,8 @@ static void TestNewlineFlags()
 
 struct ResolveLog { int calls; };
 
-static const wchar_t* TestResolver(const wchar_t* name, void* user)
+static const wchar_t* ResolverText(const wchar_t* name)
 {
-    ((ResolveLog*)user)->calls++;
     if (wcscmp(name, L"d4") == 0) return L"\\d{4}";
     if (wcscmp(name, L"d2") == 0) return L"\\d\\d";
     if (wcscmp(name, L"date") == 0) return L"(?&d4)-(?&d2)-(?&d2)";
@@ -156,8 +155,20 @@ static const wchar_t* TestResolver(const wchar_t* name, void* user)
     if (wcscmp(name, L"loop") == 0) return L"a(?&loop)?";
     if (wcscmp(name, L"w") == 0) return L"abc";
     if (wcscmp(name, L"bad") == 0) return L"(";
+    if (wcscmp(name, L"empty") == 0) return L"";
     return 0;
 }
+
+static bool TestResolver(const wchar_t* name, CRegexpString& pattern, void* user)
+{
+    const wchar_t* text = ResolverText(name);
+    ((ResolveLog*)user)->calls++;
+    if (!text) return false;
+    pattern.append(text, (int)wcslen(text));
+    return true;
+}
+
+struct ThrowingResolver { static bool Proc(const wchar_t*, CRegexpString&, void*) { throw 42; } };
 
 static bool CompileFails(const wchar_t* pat, CRegexpResolveProc proc, ResolveLog* log, int* pos = 0, char* msg = 0)
 {
@@ -208,7 +219,7 @@ static void TestResolver()
     int pos = 0;
     char msg[96] = "";
     CHECK(CompileFails(L"(?&date)", 0, 0));
-    CHECK(CompileFails(L"(?&nope)", TestResolver, &log));
+    CHECK(CompileFails(L"(?&nope)", TestResolver, &log, &pos, msg) && pos == 0 && strstr(msg, "nope") != 0);   // the message names it
     CHECK(CompileFails(L"a(?&bad)", TestResolver, &log, &pos, msg) && pos == -1 && strstr(msg, "bad") != 0);
     CHECK(CompileFails(L"(?1)", TestResolver, &log));         // only names are resolved
     CHECK(CompileFails(L"\\k<date>", TestResolver, &log));    // not a subroutine call
@@ -216,6 +227,15 @@ static void TestResolver()
     bool thrown = false;
     try { plain.Compile(L"(?&date)"); } catch (CRegexpException&) { thrown = true; }
     CHECK(thrown && !plain.IsCompiled());
+
+    // an empty pattern is a valid (empty) subroutine
+    CHECK(CRegexpW(L"^a(?&empty)b$", 0, TestResolver, &log).Match(L"ab", ctx));
+
+    // an exception thrown by the resolver propagates and leaves the object as it was
+    CRegexpW keep(L"a+");
+    int caught = 0;
+    try { keep.Compile(L"(?&x)", 0, ThrowingResolver::Proc, 0); } catch (int v) { caught = v; }
+    CHECK(caught == 42 && keep.IsCompiled() && keep.Match(L"caab", ctx) && ctx.GetEnd(0) == 3);
 }
 
 static void TestDollar()

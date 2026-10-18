@@ -99,12 +99,14 @@ private:
 
 /*
  * Resolver for subroutine calls to names the pattern does not define, such as (?&date).
- * Called while compiling, once per undefined name; returns the pattern text of that subroutine
- * (it may call further names) or 0 if the name is unknown, which is a syntax error.  The text must
- * stay valid until the call returns; user is the pointer given to Compile().  The text becomes a
- * named group appended to the pattern, so its groups are numbered after the pattern's own groups.
+ * Called while compiling, once per undefined name.  Store the pattern text of that subroutine
+ * (it may call further names) into 'pattern' (empty on entry; the engine keeps its own copy) and
+ * return true, or return false if the name is unknown, which is a syntax error that names it.
+ * user is the pointer given to Compile().  The text becomes a named group appended to the
+ * pattern, so its groups are numbered after the pattern's own groups.
+ * An exception thrown by the resolver leaves Compile() unchanged and propagates to its caller.
  */
-typedef const wchar_t* (*CRegexpResolveProc)(const wchar_t* name, void* user);
+typedef bool (*CRegexpResolveProc)(const wchar_t* name, CRegexpString& pattern, void* user);
 
 class CRegexpW {
 public:
