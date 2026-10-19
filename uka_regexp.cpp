@@ -1658,7 +1658,7 @@ bool Compiler::ReadCharEscape(Cp c, Cp& out)
                 v = v * 16 + (Cp)HexValue(At(m_pos + n));
             }
             m_pos += 4;
-            if (v >= 0xD800 && v < 0xDC00 && AtCh(m_pos, '\\') && AtCh(m_pos + 1, 'u')) {   /* 😀 : a surrogate pair is one character */
+            if (v >= 0xD800 && v < 0xDC00 && AtCh(m_pos, '\\') && AtCh(m_pos + 1, 'u')) {   /* U+1F600 etc. : a surrogate pair is one character */
                 Cp lo = 0;
                 for (n = 0; n < 4; ++n) {
                     if (m_pos + 2 + n >= m_len || HexValue(At(m_pos + 2 + n)) < 0) break;
