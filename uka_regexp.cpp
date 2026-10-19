@@ -309,9 +309,11 @@ struct Program {
     int dollarEndOnly;        /* $ only matches at the very end (DOLLAR_ENDONLY) */
     int ucp;                  /* \d \w \s \b and POSIX classes use Unicode properties (UCP, (*UCP)) */
     unsigned long limitMatch; /* (*LIMIT_MATCH=n), 0: none */
+    int memoSlots;            /* number of instructions that can record "already tried here" (0: the program cannot use it) */
+    Vec<int> memoSlot;        /* per pc: slot of an SPLIT / REP / LOOP_TEST, or -1 */
 
     Program() : ngroups(0), nloops(0), global(0), anchored(0), firstChar(-1),
-                newline(0), bsrAnyCrlf(0), notEmpty(0), dollarEndOnly(0), ucp(0), limitMatch(0) {}
+                newline(0), bsrAnyCrlf(0), notEmpty(0), dollarEndOnly(0), ucp(0), limitMatch(0), memoSlots(0) {}
 private:
     Program(const Program&);
     Program& operator=(const Program&);
@@ -848,6 +850,7 @@ private:
     bool HasGroup(int n) const;
     int FirstLiteral(int n) const;
     bool IsAnchored(int n) const;
+    void AnalyzeMemo();
 
     int Emit(int v) { m_prog.code.Push(v); return m_prog.code.Size() - 1; }
     int Emit2(int a, int b) { int p = Emit(a); Emit(b); return p; }
@@ -2255,6 +2258,60 @@ void Compiler::Run()
     m_prog.firstChar = FirstLiteral(root);
     if (sizeof(wchar_t) == 2 && m_prog.firstChar > 0xFFFF)   /* the search compares wchar_t units: use the high surrogate */
         m_prog.firstChar = (int)(0xD800 + ((Cp)(m_prog.firstChar - 0x10000) >> 10));
+    AnalyzeMemo();
+}
+
+/*
+ * Can the matcher remember the (instruction, position) pairs it has already tried?  That is valid when
+ * what happens from such a pair on depends on nothing but the position: no back references, assertions,
+ * atomic groups, subroutine calls, \K, verbs or conditions, and no loop with a counter that matters
+ * (bounded loops).  The state that is left out (captures, the start of the iteration of an enclosing
+ * unbounded loop) cannot change whether a match is reachable from there.
+ * Gives every SPLIT, REP and LOOP_TEST a slot; memoSlots stays 0 when the program does not qualify.
+ */
+void Compiler::AnalyzeMemo()
+{
+    const Vec<int>& code = m_prog.code;
+    Vec<int>& map = m_prog.memoSlot;
+    int n = code.Size(), pc = 0, slots = 0, i;
+    bool ok = true;
+
+    map.Resize(n);
+    for (i = 0; i < n; ++i) map[i] = -1;
+    while (ok && pc < n) {
+        switch (code[pc]) {
+        case OP_MATCH: case OP_ANY: case OP_ANYNL:
+        case OP_BOL: case OP_MBOL: case OP_EOL: case OP_MEOL: case OP_BOS: case OP_EOS: case OP_EOSNL:
+        case OP_WORDB: case OP_NWORDB: case OP_GPOS: case OP_UWORDB: case OP_UNWORDB:
+        case OP_FAIL: case OP_GRAPHEME:
+            pc += 1;
+            break;
+        case OP_CHAR: case OP_CHARI: case OP_CLASS: case OP_JMP: case OP_OPEN: case OP_CLOSE:
+        case OP_LOOP_INIT: case OP_LOOP_BODY: case OP_BSR:
+            pc += 2;
+            break;
+        case OP_SPLIT:
+            map[pc] = slots++;
+            pc += 3;
+            break;
+        case OP_REP:
+            map[pc] = slots++;
+            pc += 6;
+            break;
+        case OP_LOOP_TEST:
+            if (code[pc + 3] >= 0 || code[pc + 2] > 1) ok = false;   /* the counter would be part of the state */
+            map[pc] = slots++;
+            pc += 6;
+            break;
+        case OP_LOOP_END:
+            pc += 5;
+            break;
+        default:
+            ok = false;
+            break;
+        }
+    }
+    if (ok && pc == n) m_prog.memoSlots = slots;
 }
 
 /* ------------------------------------------------------------------------------------------ */
@@ -2743,8 +2800,9 @@ void Compiler::Gen(int n)
  *   BT_UNDO    a = index in st[], b = old value
  *   BT_POOL    a = frames size, b = snaps size                  undo of a subroutine call's bookkeeping
  *   BT_VERB    a = VERB_*, b = pos                              (*COMMIT) (*PRUNE) (*SKIP): backtracking onto it ends the attempt
+ *   BT_MEMO    a = bit in Work::memo                            everything above failed: record that (see MemoKnownFail)
  */
-enum { BT_CHOICE = 1, BT_GREEDY, BT_LAZY, BT_MARK, BT_LB, BT_UNDO, BT_POOL, BT_VERB };
+enum { BT_CHOICE = 1, BT_GREEDY, BT_LAZY, BT_MARK, BT_LB, BT_UNDO, BT_POOL, BT_VERB, BT_MEMO };
 
 struct BtEntry { int type; int a; int b; int c; };
 
@@ -2762,7 +2820,13 @@ struct Work {
     Vec<Frame> frames;
     Vec<int> snaps;
     Vec<int> hnodes;    /* capture history for balancing groups: start, end, previous node */
+    Vec<unsigned int> memo;   /* bit per (memo slot, position): already tried, see Program::memoSlots */
 };
+
+/* a single Run() that has backtracked this many times starts remembering the states it has tried */
+#ifndef UKA_REGEXP_MEMO_START
+#define UKA_REGEXP_MEMO_START 4096UL
+#endif
 
 static inline bool IsWordCp(Cp c)
 {
@@ -2960,6 +3024,20 @@ private:
         while (i >= 0 && m_w.stack[i].type != BT_MARK) --i;
         return i;
     }
+    void StartMemo();
+    /*
+     * Does the instruction at pc, reached at pos, already have a known outcome: a failure?  If not, a BT_MEMO
+     * entry is pushed that records the failure once the backtracking has popped everything above it.  A visit
+     * that is still running is not recorded, so the one empty iteration of a loop is still tried as before.
+     * The matcher never moves back, so a failure also holds for the Runs that start later in the same Search.
+     */
+    bool MemoKnownFail(int pc, int pos)
+    {
+        unsigned long bit = (unsigned long)m_prog.memoSlot[pc] * m_memoRow + (unsigned long)pos;
+        if (m_w.memo[(int)(bit >> 5)] & (1u << (bit & 31))) return true;
+        PushBt(BT_MEMO, (int)bit, 0, 0);
+        return false;
+    }
     void CutTo(int mark);
     void UnwindTo(int mark);
     void PushHist(int g, int s, int e);
@@ -2973,6 +3051,9 @@ private:
     bool m_exact;
     unsigned long m_limit;
     unsigned long m_steps;
+    bool m_memoOn;      /* MemoKnownFail() is in use */
+    unsigned long m_memoRow;   /* positions per memo slot */
+    unsigned long m_memoAt;    /* value of m_steps at which the current Run() starts using the memo, 0: never */
     int m_stackLimit;   /* maximum number of backtrack stack entries */
     int m_verb;         /* VERB_* that ended the last Run(), or 0 */
     int m_verbPos;
@@ -2988,7 +3069,8 @@ private:
 
 Matcher::Matcher(const Program& prog, Work& w, const wchar_t* s, int n, int gpos, int notEmptyAt, unsigned long limit)
     : m_prog(prog), m_w(w), m_s(s), m_n(n), m_gpos(gpos), m_notEmptyAt(notEmptyAt), m_exact(false),
-      m_limit(limit), m_steps(0), m_verb(0), m_verbPos(0), m_code(prog.code.Data())
+      m_limit(limit), m_steps(0), m_memoOn(false), m_memoRow((unsigned long)n + 1), m_memoAt(0),
+      m_verb(0), m_verbPos(0), m_code(prog.code.Data())
 {
     int i;
     m_stackLimit = (n > (0x3FFFFFFF - (1 << 22)) / 32) ? 0x3FFFFFFF : (1 << 22) + 32 * n;
@@ -3045,6 +3127,20 @@ void Matcher::PushHist(int g, int s, int e)
     SetSt(m_hist + g, idx);
 }
 
+/* start remembering the states that were tried (unless the table would be too big) */
+void Matcher::StartMemo()
+{
+    const unsigned long maxBits = 1UL << 27;
+    m_memoAt = 0;
+    if ((unsigned long)m_prog.memoSlots > maxBits / m_memoRow) return;
+    {
+        unsigned long words = ((unsigned long)m_prog.memoSlots * m_memoRow + 31) / 32;
+        m_w.memo.Resize((int)words);
+        memset(m_w.memo.Data(), 0, sizeof(unsigned int) * words);
+    }
+    m_memoOn = true;
+}
+
 bool Matcher::Run(int startPos)
 {
     const int* code = m_code;
@@ -3059,6 +3155,10 @@ bool Matcher::Run(int startPos)
 
     m_verb = 0;
     m_w.hnodes.Clear();
+    if (!m_memoOn && m_prog.memoSlots > 0) {
+        if (UKA_REGEXP_MEMO_START == 0) StartMemo();
+        else m_memoAt = m_steps + UKA_REGEXP_MEMO_START;
+    }
     for (;;) {
         switch (code[pc]) {
         case OP_MATCH: {
@@ -3139,6 +3239,7 @@ bool Matcher::Run(int startPos)
             pc = code[pc + 1];
             continue;
         case OP_SPLIT:
+            if (m_memoOn && MemoKnownFail(pc, pos)) goto fail;
             PushBt(BT_CHOICE, code[pc + 2], pos, 0);
             pc = code[pc + 1];
             continue;
@@ -3278,7 +3379,9 @@ bool Matcher::Run(int startPos)
         case OP_REP: {
             int mode = code[pc + 1], mn = code[pc + 2], mx = code[pc + 3];
             int aop = code[pc + 4], arg = code[pc + 5];
-            int cnt = 0, q = ScanAtoms(m_prog, aop, arg, s, pos, n, mn, &cnt);   /* cnt characters from pos to q */
+            int cnt = 0, q;
+            if (m_memoOn && MemoKnownFail(pc, pos)) goto fail;
+            q = ScanAtoms(m_prog, aop, arg, s, pos, n, mn, &cnt);   /* cnt characters from pos to q */
             if (cnt < mn) goto fail;
             if (mode == REP_LAZY) {
                 pos = q;
@@ -3308,6 +3411,7 @@ bool Matcher::Run(int startPos)
             int mn = code[pc + 2], mx = code[pc + 3];
             if (cnt < mn) { pc += 6; continue; }
             if (mx >= 0 && cnt >= mx) { pc = code[pc + 5]; continue; }
+            if (m_memoOn && MemoKnownFail(pc, pos)) goto fail;
             if (code[pc + 4] == 0) {   /* greedy: another iteration first */
                 PushBt(BT_CHOICE, code[pc + 5], pos, 0);
                 pc += 6;
@@ -3398,6 +3502,7 @@ bool Matcher::Run(int startPos)
     fail:
         if (++m_steps > m_limit)
             throw CRegexpException(CRegexpException::ERR_STEP_LIMIT, -1, "backtrack limit exceeded");
+        if (m_steps == m_memoAt) StartMemo();
         for (;;) {
             if (stk.Empty()) return false;
             BtEntry& e = stk.Back();
@@ -3435,6 +3540,10 @@ bool Matcher::Run(int startPos)
                 if (mx >= 0 && e.c >= mx) stk.Pop(); else e.b = pos;
                 goto resume;
             }
+            case BT_MEMO:
+                m_w.memo[e.a >> 5] |= 1u << (e.a & 31);
+                stk.Pop();
+                continue;
             case BT_VERB:
                 m_verb = e.a;
                 m_verbPos = e.b;

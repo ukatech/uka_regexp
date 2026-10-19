@@ -84,6 +84,7 @@ catch (CRegexpException& ex) {
 - `GLOBAL` のとき `start` を省略した `Match()` は、同じ `ctx` での前回の一致の終わりから探し、`while (re.Match(s, ctx)) {...}` で全部の一致を順に取れます。空の一致が続いて止まらないことはありません。失敗すると位置は 0 に戻ります。
 - **スレッド**: コンパイル済みの `CRegexpW` は複数スレッドから同時に使えます。`CRegexpContext` はスレッドごとに用意してください。
 - **ステップ上限**: `(.*a){12}c` のようなパターンは入力によって指数時間かかるため、バックトラック回数に上限があります。既定は `1000000 + 256 × 入力の長さ` で、超えると `ERR_STEP_LIMIT` の例外が飛びます。`\w+@` を単語文字が何万文字も続く入力に当てるような二乗オーダーのパターンも打ち切られます。バックトラック用スタックにも入力長に比例した上限（`4M + 32 × 長さ` 個）があり、同じ例外になります。パターンの先頭に `(*LIMIT_MATCH=n)` を書くと、回数をそれ以下に下げられます。
+- **失敗した状態の記憶**: 後方参照・先読み/後読み・アトミックグループ・サブルーチン呼び出し・制御動詞・`\K`・条件式・回数指定のあるグループのループを含まないパターンでは、1 回の照合でバックトラックが `UKA_REGEXP_MEMO_START`（既定 4096）回を超えると、完全に失敗した（パターンの位置, 入力の位置）を覚え、二度目からは調べません。`(a+)+b` のような指数時間のパターンが多項式時間になります（仕様は README の「制限」）。表の大きさは `命令数 × (入力長 + 1)` ビットで、2^27 ビット（16MB）を超えるときは使いません。
 
 ### サブルーチンの外部定義（コールバックによる解決）
 
@@ -122,10 +123,12 @@ CRegexpW re(L"^(?&date)$", 0, Resolve, /* user = */ 0);   // 呼ばれるのは�
 ```sh
 make test            # 手書きケース (tests/cases_manual.txt) と API テスト (tests/test_api.cpp)
 make compare-perl    # Perl 5.30 以降があれば、tests/cases_perl.txt を Perl の結果と比較
+make compare-memo    # 失敗した状態の記憶を最初から使う版と使わない版で、ランダムなパターンの結果を比較（python3 が必要）
 ```
 
 - `tests/run_cases.cpp` … タブ区切りのケースファイルを実行するランナー（`--verify` で期待値と比較）。
-- `tests/cases_perl.txt` … Perl と比べるケース。仕様として違う 43 件は `tests/perl_known_diffs.txt` に記録してあり、増減すると `compare-perl` が知らせます。
+- `tests/cases_perl.txt` … Perl と比べるケース。仕様として違う 40 件は `tests/perl_known_diffs.txt` に記録してあり、増減すると `compare-perl` が知らせます。
+- `tests/memo_compare.sh` / `tests/fuzz_memo_gen.py` … `make compare-memo` の本体と、記憶の対象になるパターン（入れ子のループ・空になりうる本体・ループ内の捕獲）の生成器。`-DUKA_REGEXP_MEMO_START=0` で記憶を最初のステップから使うビルドになります。ステップ上限に達していた側だけは差が出てよく、それ以外の差は不具合です。
 - `tests/fuzz_gen.py` … Perl と比べるランダムパターンの生成器（`python3 tests/fuzz_gen.py SEED COUNT > file`）。`python3 tests/fuzz_compare.py build/run_cases file` で Perl と比べます（Perl が終わらないケースは飛ばし、グループ 0 の範囲だけを比べます）。
 - Unicode のデータ（一般カテゴリ・大文字小文字変換・スクリプト・書記素の分類・二値プロパティ）は `uka_regexp.cpp` の末尾に埋め込んであり、`make unicode-tables`（`tools/gen_unicode_tables.py`）で作り直せます。カテゴリと大文字小文字は Python の `unicodedata` から、それ以外は unicode.org の UCD ファイルから取得します（`tools/ucd/` にキャッシュ、`python3 tools/gen_unicode_tables.py DIR` で取得済みのディレクトリも指定できます）。
 

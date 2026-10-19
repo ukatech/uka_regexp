@@ -127,7 +127,7 @@ g	a\Kb	abab	1-2;3-4
 	[[:foo:]]	a	ERR
 	(?<=a)(?(1)b)	a	ERR
 	(.*a){12}c	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	LIMIT
-	^(a+)+$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	LIMIT
+	^(a+)+$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	NOMATCH
 	(?:(?:)*)*b	aaaa	NOMATCH
 	(?:a?)*b	aaaa	NOMATCH
 	(a*)*b	aaaa	NOMATCH
@@ -366,3 +366,23 @@ g	😀*	😀a	0-1;1-1;2-2
 	(*UCP)[[:upper:]]	𐐀	0-1
 	(*UCP)\d+	𝟘𝟙x	0-2
 	^.$	\x{D83D}	0-1
+
+# Catastrophic backtracking: states that already failed are not searched again (patterns without back references,
+# lookarounds, atomic groups or bounded loops), so these end quickly with NOMATCH instead of hitting the step limit
+	^(a+)+b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac	NOMATCH
+	^(a+)+b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaab	0-41 0-40
+	^(a*)*b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac	NOMATCH
+	^(a|aa)+b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac	NOMATCH
+	^(a|a?)+b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac	NOMATCH
+	(x+x+)+y	xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx	NOMATCH
+	^([a-z]+)*[0-9]$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	NOMATCH
+	^(\w+\s?)*$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	NOMATCH
+	a*a*a*a*a*b	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa	NOMATCH
+	^(?:a|a)*b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac	NOMATCH
+	^(?:(a+)+|b)*c	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac	0-41 0-40
+# the captures left by an empty last iteration are the same with and without it
+	c{2,}.{2,}|(((a++|\b+)+?(c*+){1,}){1,})+?|a	a	0-1 0-1 1-1 1-1 1-1
+# not covered: bounded loops, lookarounds and back references still run into the step limit
+	^(.*a){12}c$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	LIMIT
+	^(?=a)(a+)+b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	LIMIT
+	^(a+)+\1b$	aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!	LIMIT

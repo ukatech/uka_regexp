@@ -14,10 +14,11 @@ Vec/データ構造/文字集合 → `Compiler`（パーサ→構文木 `Node`�
 - `Matcher::st[]` に捕獲・ループカウンタ・\K・現在フレームを全部入れ、`BtEntry` スタックに undo を積む。再帰呼び出し（`OP_CALL`）は `st[]` のスナップショットを取り、`OP_CLOSE` で復元して戻る。
 - 定義の無い名前のサブルーチン呼び出しは `Compiler::ResolveExternal()` がコールバックでパターン文字列に解決し、グループとして `MATCH` の後ろに生成する（呼び出し専用）。
 - 制御動詞は `BT_VERB` エントリ。戻ってきたら `Run` が false を返し、`Search` が `m_verb` を見て開始位置を進める。
+- `Compiler::AnalyzeMemo()` が、状態が (pc, pos) だけで決まるプログラム（後方参照・先読み・atomic・CALL・動詞・\K・回数付きループ無し）の SPLIT / REP / LOOP_TEST に slot を振る。`Run` はバックトラックが `UKA_REGEXP_MEMO_START` 回を超えるとビット表を作り、`BT_MEMO` エントリが pop された（配下が全部失敗した）時にだけ「失敗済み」を記録する。探索中の状態は刈らない（ループの空反復 1 回を許す仕様で捕獲の値が変わるため）。対象を広げたら `make compare-memo` で必ず確かめる。
 - 末尾の `// ==== BEGIN GENERATED TABLES` 〜 `END` は `tools/gen_unicode_tables.py` が書き換える（`make unicode-tables`）。手で編集しない。新しい表を参照するときは、先頭の `extern` 宣言を足す。
 
 ## テスト（変更したら必ず）
-`make test` → `make compare-perl`（Perl 5.30+、既知の差分 43 件は `tests/perl_known_diffs.txt`。仕様変更で差分が増減したらそのファイルを意図的に更新）。
+`make test` → `make compare-memo`（失敗の記憶の有無で結果が変わらないこと）→ `make compare-perl`（Perl 5.30+、既知の差分 40 件は `tests/perl_known_diffs.txt`。仕様変更で差分が増減したらそのファイルを意図的に更新）。
 大きな変更後は `tests/fuzz_gen.py` のランダムケースを `tests/fuzz_compare.py` で Perl と比べ（Perl は否定先読み内の捕獲を外に漏らす・一部の最適化に不具合があるので、差分は原因を読んで判断する）、`-fsanitize=address,undefined` でも走らせること。
 `-std=c++98 -Wall -Wextra -pedantic` で g++ と clang の警告ゼロを保つ。16bit wchar_t は `-fshort-wchar` で確認できる。
 

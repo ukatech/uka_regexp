@@ -36,6 +36,10 @@ jobs:
       - name: Build and run the tests
         run: make test CXX=${{ matrix.cxx }}
 
+      # 失敗した状態の記憶が結果を変えないこと
+      - name: Compare with and without the failure memo
+        run: make compare-memo CXX=${{ matrix.cxx }}
+
   # ASan + UBSan 付きで同じテストと、ランダムパターンを流す
   sanitize:
     name: Sanitizers (${{ matrix.name }})

@@ -22,6 +22,10 @@ test: $(BUILD)/run_cases $(BUILD)/test_api
 compare-perl: $(BUILD)/run_cases
 	sh tests/compare_perl.sh $(BUILD)/run_cases
 
+# results must not depend on remembering failed states: memo used from the first step vs never (needs python3)
+compare-memo:
+	sh tests/memo_compare.sh $(CXX)
+
 # rebuild the Unicode tables inside uka_regexp.cpp (needs python3)
 unicode-tables:
 	python3 tools/gen_unicode_tables.py
@@ -29,4 +33,4 @@ unicode-tables:
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all test compare-perl unicode-tables clean
+.PHONY: all test compare-perl compare-memo unicode-tables clean
