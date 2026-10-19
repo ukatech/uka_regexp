@@ -46,11 +46,14 @@ void CRegexpString::clear()
     if (m_buf) m_buf[0] = 0;
 }
 
+static const int STR_MAX_CAP = 0x3FFFFFFF;   /* keeps sizeof(wchar_t) * cap inside a 32-bit size_t */
+
 void CRegexpString::Reserve(int n)   /* room for n characters plus the terminator */
 {
+    if (n < 0 || n >= STR_MAX_CAP) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
     if (n + 1 <= m_cap) return;
     int cap = m_cap ? m_cap : 32;
-    while (cap < n + 1) cap *= 2;
+    while (cap < n + 1) cap = (cap > STR_MAX_CAP / 2) ? STR_MAX_CAP : cap * 2;
     wchar_t* p = (wchar_t*)realloc(m_buf, sizeof(wchar_t) * cap);
     if (!p) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
     m_buf = p;
@@ -60,8 +63,12 @@ void CRegexpString::Reserve(int n)   /* room for n characters plus the terminato
 void CRegexpString::append(const wchar_t* s, int n)
 {
     if (n <= 0) return;
+    if (n > 0x7FFFFFFF - m_len) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
+    /* s may point into our own buffer, which Reserve() can move */
+    int off = (m_buf && s >= m_buf && s < m_buf + m_cap) ? (int)(s - m_buf) : -1;
     Reserve(m_len + n);
-    memcpy(m_buf + m_len, s, sizeof(wchar_t) * n);
+    if (off >= 0) s = m_buf + off;
+    memmove(m_buf + m_len, s, sizeof(wchar_t) * n);
     m_len += n;
     m_buf[m_len] = 0;
 }
@@ -151,7 +158,11 @@ public:
     {
         if (n <= m_cap) return;
         int cap = m_cap ? m_cap * 2 : 16;
-        while (cap < n) cap *= 2;
+        while (cap < n) {
+            if (cap > 0x3FFFFFFF) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
+            cap *= 2;
+        }
+        if ((size_t)cap > (size_t)-1 / sizeof(T)) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
         T* p = (T*)realloc(m_p, sizeof(T) * cap);
         if (!p) throw CRegexpException(CRegexpException::ERR_MEMORY, -1, "out of memory");
         m_p = p;
@@ -6102,6 +6113,10 @@ bool CRegexpW::MatchImpl(const wchar_t* str, int len, CRegexpContext& ctx, int s
     ctx.m_next = 0;
     ctx.m_lastEmpty = 0;
     if (from > len) return false;
+    if (IsMidPair(str, len, from)) {   /* a match never starts inside a surrogate pair */
+        if (exact) return false;
+        ++from;
+    }
     if (m_prog->notEmpty == 2 && notEmpty < 0) notEmpty = from;   /* (*NOTEMPTY_ATSTART) */
 
     if (len > (int)((0xFFFFFFFFUL - m_stepBase) / (m_stepPer ? m_stepPer : 1UL))) limit = 0xFFFFFFFFUL;
@@ -6230,6 +6245,13 @@ int CRegexpW::Replace(const wchar_t* str, int len, const wchar_t* repl, CRegexpS
     return ReplaceImpl(str, len, repl, out, true, maxCount, lastStart, lastEnd);
 }
 
+/* does p point into the text held by s? */
+static bool InsideString(const CRegexpString& s, const wchar_t* p)
+{
+    const wchar_t* b = s.c_str();
+    return b != g_emptyWide && p >= b && p <= b + s.size();
+}
+
 int CRegexpW::ReplaceImpl(const wchar_t* str, int len, const wchar_t* repl, CRegexpString& out,
                           bool all, int maxCount, int* lastStart, int* lastEnd) const
 {
@@ -6239,6 +6261,13 @@ int CRegexpW::ReplaceImpl(const wchar_t* str, int len, const wchar_t* repl, CReg
     if (lastEnd) *lastEnd = -1;
     if (!m_prog) throw CRegexpException(CRegexpException::ERR_NOT_COMPILED, -1, "pattern is not compiled");
     if (len < 0) len = WLen(str);
+    if (InsideString(out, str) || InsideString(out, repl)) {   /* clear() and append() would destroy the input */
+        CRegexpString tmp;
+        count = ReplaceImpl(str, len, repl, tmp, all, maxCount, lastStart, lastEnd);
+        out.clear();
+        out.append(tmp.c_str(), tmp.size());
+        return count;
+    }
     out.clear();
     while (maxCount < 0 || count < maxCount) {
         int ms, me, rs;

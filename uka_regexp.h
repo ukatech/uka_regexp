@@ -145,7 +145,7 @@ public:
      * Search for the first match.  The result is stored in ctx.
      *   start < 0 : search from offset 0, or - when GLOBAL is set - from where the previous
      *               match in this ctx ended (an empty match is never repeated at the same place).
-     *   start >= 0: search from this offset.
+     *   start >= 0: search from this offset (an offset inside a surrogate pair is moved to the next character).
      * \G matches at the offset the search started from.
      * Throws CRegexpException(ERR_STEP_LIMIT) when the backtrack limit is exceeded.
      */

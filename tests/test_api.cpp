@@ -496,6 +496,65 @@ static void TestSurrogatePairs()
     }
 }
 
+// the input of Replace() / append() may live inside the output string
+static void TestAliasing()
+{
+    {
+        CRegexpString s;   // append() from its own buffer, with and without a reallocation
+        int i;
+        s.append(L"abc", 3);
+        s.append(s.c_str(), 3);
+        CHECK(wcscmp(s.c_str(), L"abcabc") == 0);
+        for (i = 0; i < 6; ++i) s.append(s.c_str(), s.size());   // grows past the first capacity
+        CHECK(s.size() == 6 * 64);
+        CHECK(wcsncmp(s.c_str() + 6 * 63, L"abcabc", 6) == 0);
+        s.clear();
+        s.append(L"xyz", 3);
+        s.append(s.c_str() + 1, 2);
+        CHECK(wcscmp(s.c_str(), L"xyzyz") == 0);
+    }
+    {
+        CRegexpW re(L"b", CRegexpW::GLOBAL);
+        CRegexpString out;
+        CHECK(re.Replace(L"abcbd", L"[$_]", out) == 2);   // out now holds the subject
+        CHECK(wcscmp(out.c_str(), L"a[abcbd]c[abcbd]d") == 0);
+        CRegexpString text;
+        text.append(L"abcbd", 5);
+        CHECK(re.Replace(text.c_str(), text.size(), L"X", text) == 2);   // same string as subject and output
+        CHECK(wcscmp(text.c_str(), L"aXcXd") == 0);
+        text.clear();
+        text.append(L"abcbd", 5);
+        CHECK(re.Replace(text.c_str() + 1, 3, L"<$&>", text) == 2);   // part of the output as the subject
+        CHECK(wcscmp(text.c_str(), L"<b>c<b>") == 0);
+        text.clear();
+        text.append(L"Q", 1);
+        CHECK(re.Replace(L"abc", 3, text.c_str(), text) == 1);   // the template is the output string
+        CHECK(wcscmp(text.c_str(), L"aQc") == 0);
+    }
+}
+
+// a start offset inside a surrogate pair is moved to the next character boundary
+static void TestStartInsidePair()
+{
+    wchar_t subj[8];
+    int n = 0, units;
+    CRegexpContext ctx;
+    subj[n++] = L'a';
+    n += PutCp(subj + n, 0x1F600);
+    subj[n++] = L'b';
+    subj[n] = 0;
+    units = (sizeof(wchar_t) == 2) ? 2 : 1;
+    if (sizeof(wchar_t) != 2) return;
+    {
+        CRegexpW re(L".");
+        CHECK(re.Match(subj, n, ctx, 2) && ctx.GetStart(0) == 1 + units && ctx.GetEnd(0) == 2 + units);   // 2 is the low surrogate
+        CRegexpW re2(L"\\G.");
+        CHECK(re2.Match(subj, n, ctx, 2) && ctx.GetStart(0) == 1 + units);
+        CRegexpW re3(L"");
+        CHECK(re3.Match(subj, n, ctx, 2) && ctx.GetStart(0) == 1 + units && ctx.GetEnd(0) == 1 + units);
+    }
+}
+
 int main()
 {
     RUN(TestReplace);
@@ -509,6 +568,8 @@ int main()
     RUN(TestKeepInAssertion);
     RUN(TestUnicodeFlag);
     RUN(TestSurrogatePairs);
+    RUN(TestStartInsidePair);
+    RUN(TestAliasing);
     RUN(TestLimits);
     RUN(TestLongInput);
     printf("%d checks, %d failed\n", g_total, g_failed);
