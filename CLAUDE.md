@@ -15,6 +15,7 @@ Vec/データ構造/文字集合 → `Compiler`（パーサ→構文木 `Node`�
 - 定義の無い名前のサブルーチン呼び出しは `Compiler::ResolveExternal()` がコールバックでパターン文字列に解決し、グループとして `MATCH` の後ろに生成する（呼び出し専用）。
 - 制御動詞は `BT_VERB` エントリ。戻ってきたら `Run` が false を返し、`Search` が `m_verb` を見て開始位置を進める。
 - `Compiler::AnalyzeMemo()` が、状態が (pc, pos) だけで決まるプログラム（後方参照・先読み・atomic・CALL・動詞・\K・回数付きループ無し）の SPLIT / REP / LOOP_TEST に slot を振る。`Run` はバックトラックが `UKA_REGEXP_MEMO_START` 回を超えるとビット表を作り、`BT_MEMO` エントリが pop された（配下が全部失敗した）時にだけ「失敗済み」を記録する。探索中の状態は刈らない（ループの空反復 1 回を許す仕様で捕獲の値が変わるため）。対象を広げたら `make compare-memo` で必ず確かめる。
+- `Search` の近道は `Compiler` が作る: `FirstLiteral()`（先頭の固定文字）、`FirstSet()`（最初の 1 文字になりうる集合。制御動詞より前は飛ばさないので、動詞に当たったら使わない）、`RequiredChar()`（どの一致にも必ず含まれる文字）。どれも結果を変えない範囲に限る。`BT_GREEDY` は直後が `OP_CHAR` ならその文字の位置まで飛ぶが、飛ばした位置もステップに数える（上限に当たるかどうかを変えない）。
 - 末尾の `// ==== BEGIN GENERATED TABLES` 〜 `END` は `tools/gen_unicode_tables.py` が書き換える（`make unicode-tables`）。手で編集しない。新しい表を参照するときは、先頭の `extern` 宣言を足す。
 
 ## テスト（変更したら必ず）

@@ -292,25 +292,44 @@ static void TestLimits()
     CRegexpContext ctx;
     CRegexpW bad(L"(.*a){12}c");
     bool limit = false;
-    try { bad.Match(L"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ctx); }
+    // (the subjects contain the last character of the pattern, else the search gives up without trying)
+    try { bad.Match(L"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!c", ctx); }
     catch (CRegexpException& e) { limit = e.GetCode() == CRegexpException::ERR_STEP_LIMIT; }
     CHECK(limit);
+    CHECK(!bad.Match(L"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ctx));   // no 'c': no match at once
 
     // the limit can be changed
     CRegexpW quad(L"\\w+@");
     static wchar_t big[60001];
     int i;
     for (i = 0; i < 60000; ++i) big[i] = L'a';
+    big[59998] = L'!';
+    big[59999] = L'@';
     big[60000] = 0;
     limit = false;
     try { quad.Match(big, ctx); } catch (CRegexpException&) { limit = true; }
     CHECK(limit);
     quad.SetStepLimit(0xFFFFFFFFUL, 0);
     for (i = 0; i < 3000; ++i) big[i] = L'a';
+    big[2998] = L'!';
+    big[2999] = L'@';
     big[3000] = 0;
     limit = false;
     try { CHECK(!quad.Match(big, ctx)); } catch (CRegexpException&) { limit = true; }
     CHECK(!limit);
+    // a per-character part of 0 or 1 does not overflow into "no limit"
+    quad.SetStepLimit(1000, 0);
+    limit = false;
+    try { quad.Match(big, ctx); } catch (CRegexpException&) { limit = true; }
+    CHECK(limit);
+    quad.SetStepLimit(1000, 1);
+    limit = false;
+    try { quad.Match(big, ctx); } catch (CRegexpException&) { limit = true; }
+    CHECK(limit);
+    quad.SetStepLimit(0, 0);   // 0 steps: the first failure ends the search
+    limit = false;
+    try { quad.Match(L"a!@", ctx); } catch (CRegexpException&) { limit = true; }
+    CHECK(limit);
 
     // normal patterns have plenty of room
     CRegexpW ok(L"\\w+@");
@@ -493,6 +512,18 @@ static void TestSurrogatePairs()
         lone[2] = 0;
         CRegexpW re(L"^..$");
         CHECK(re.Match(lone, 2, ctx));
+
+        // a back reference to a lone high surrogate does not end in front of the low half of a pair
+        wchar_t half[5];
+        half[0] = 0xD83D;
+        half[1] = L'x';
+        half[2] = 0xD83D;
+        half[3] = 0xDE00;
+        half[4] = 0;
+        CRegexpW br(L"(\\x{D83D})x\\1");
+        CHECK(!br.Match(half, 4, ctx));
+        half[3] = L'y';
+        CHECK(br.Match(half, 4, ctx) && ctx.GetEnd(0) == 3);
     }
 }
 

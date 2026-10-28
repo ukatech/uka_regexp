@@ -314,6 +314,10 @@ struct Program {
     int global;
     int anchored;             /* a match can only start at the search start */
     int firstChar;            /* a match must start with this character, or -1 */
+    int useStartSet;          /* firstChar < 0, but the first wchar_t of a match is one in startSet */
+    unsigned int startSet[8]; /* bit per wchar_t value below 256 */
+    int startHigh;            /* ... or any value of 256 and more */
+    int reqChar;              /* a wchar_t every match must contain (at or after its start), or -1 */
     int newline;              /* NL_* newline convention */
     int bsrAnyCrlf;           /* \R only matches CR, LF and CRLF */
     int notEmpty;             /* 1: never return an empty match; 2: not an empty match at the search start */
@@ -323,7 +327,7 @@ struct Program {
     int memoSlots;            /* number of instructions that can record "already tried here" (0: the program cannot use it) */
     Vec<int> memoSlot;        /* per pc: slot of an SPLIT / REP / LOOP_TEST, or -1 */
 
-    Program() : ngroups(0), nloops(0), global(0), anchored(0), firstChar(-1),
+    Program() : ngroups(0), nloops(0), global(0), anchored(0), firstChar(-1), useStartSet(0), startHigh(0), reqChar(-1),
                 newline(0), bsrAnyCrlf(0), notEmpty(0), dollarEndOnly(0), ucp(0), limitMatch(0), memoSlots(0) {}
 private:
     Program(const Program&);
@@ -758,6 +762,13 @@ static bool EqAscii(const wchar_t* w, int n, const char* a)
     return a[n] == 0;
 }
 
+/* the first wchar_t of the code point c (-1 stays -1): the search compares wchar_t units, so use the high surrogate */
+static int FirstUnit(int c)
+{
+    if (sizeof(wchar_t) == 2 && c > 0xFFFF) return (int)(0xD800 + ((Cp)(c - 0x10000) >> 10));
+    return c;
+}
+
 class Compiler {
 public:
     Compiler(Program& prog, const wchar_t* pat, int len, unsigned int flags,
@@ -860,6 +871,8 @@ private:
     void LenOf(int n, int& mn, int& mx) const;
     bool HasGroup(int n) const;
     int FirstLiteral(int n) const;
+    bool FirstSet(int n, unsigned int* bits, int& high, bool& canBeEmpty) const;
+    int RequiredChar(int n) const;
     bool IsAnchored(int n) const;
     void AnalyzeMemo();
 
@@ -1207,9 +1220,10 @@ bool Compiler::ParseRefToken(int start, int len, int& num, int& nameRef)
         long v = 0;
         int j;
         for (j = i; j < len; ++j) { v = v * 10 + (long)(At(start + j) - '0'); if (v > 100000L) return false; }
+        if (sign != 0 && v == 0) return false;   /* -0 and +0 name no group */
         if (sign < 0) v = (long)m_counter - v + 1;
         else if (sign > 0) v = (long)m_counter + v;
-        if (v < 0) return false;
+        if (v < (sign != 0 ? 1 : 0)) return false;   /* (?-3) with only two groups before it must not become (?R) */
         num = (int)v;
         return true;
     }
@@ -2266,9 +2280,20 @@ void Compiler::Run()
         }
     }
     m_prog.anchored = IsAnchored(root) ? 1 : 0;
-    m_prog.firstChar = FirstLiteral(root);
-    if (sizeof(wchar_t) == 2 && m_prog.firstChar > 0xFFFF)   /* the search compares wchar_t units: use the high surrogate */
-        m_prog.firstChar = (int)(0xD800 + ((Cp)(m_prog.firstChar - 0x10000) >> 10));
+    m_prog.firstChar = FirstUnit(FirstLiteral(root));
+    if (m_prog.firstChar < 0 && !m_prog.anchored) {
+        bool canBeEmpty = false;
+        int i;
+        memset(m_prog.startSet, 0, sizeof(m_prog.startSet));
+        m_prog.startHigh = 0;
+        if (FirstSet(root, m_prog.startSet, m_prog.startHigh, canBeEmpty) && !canBeEmpty) {
+            m_prog.useStartSet = 1;
+            for (i = 0; i < 8; ++i) if (m_prog.startSet[i] != 0xFFFFFFFFu) break;
+            if (i == 8 && m_prog.startHigh) m_prog.useStartSet = 0;   /* every character: no use */
+        }
+    }
+    m_prog.reqChar = FirstUnit(RequiredChar(root));
+    if (m_prog.reqChar == m_prog.firstChar) m_prog.reqChar = -1;   /* the search finds that one anyway */
     AnalyzeMemo();
 }
 
@@ -2488,6 +2513,107 @@ int Compiler::FirstLiteral(int n) const
         return FirstLiteral(nd.child);
     case N_REPEAT:
         return nd.a >= 1 ? FirstLiteral(nd.child) : -1;
+    default:
+        return -1;
+    }
+}
+
+/*
+ * Which characters can the first character of a match of node n be?  Adds the possible first wchar_t
+ * values to bits (values below 256) and high (any value of 256 and more); canBeEmpty is set when n can
+ * match without consuming anything, so that what follows n can supply the first character as well.
+ * Returns false when it cannot tell (any character, back references, calls, conditions, verbs).
+ */
+bool Compiler::FirstSet(int n, unsigned int* bits, int& high, bool& canBeEmpty) const
+{
+    const Node& nd = m_nodes[n];
+    int c, x;
+    canBeEmpty = false;
+    switch (nd.type) {
+    case N_CHAR:
+        if (nd.b && UcHasCaseVariants((Cp)nd.a)) {   /* every character with the same case fold */
+            Cp f = UcFold((Cp)nd.a);
+            for (x = 0; x < 256; ++x) if (UcFold((Cp)x) == f) bits[x >> 5] |= 1u << (x & 31);
+            high = 1;
+        } else if (nd.a < 256) {
+            bits[nd.a >> 5] |= 1u << (nd.a & 31);
+        } else {
+            high = 1;
+        }
+        return true;
+    case N_CLASS:
+        for (x = 0; x < 256; ++x) if (ClassMatch(m_prog, nd.a, (Cp)x)) bits[x >> 5] |= 1u << (x & 31);
+        high = 1;
+        return true;
+    case N_BSR:
+        for (x = 10; x <= 13; ++x) bits[x >> 5] |= 1u << (x & 31);
+        bits[0x85 >> 5] |= 1u << (0x85 & 31);
+        high = 1;
+        return true;
+    case N_EMPTY:
+    case N_ASSERT:
+    case N_KEEP:
+    case N_LOOK:
+        canBeEmpty = true;   /* consumes nothing: the first character comes from what follows */
+        return true;
+    case N_VERB:
+        /* (*FAIL) never matches; skipping start positions in front of (*COMMIT) etc. would change the result */
+        if (nd.a != 0) return false;
+        canBeEmpty = true;
+        return true;
+    case N_CAT:
+        canBeEmpty = true;
+        for (c = nd.child; c >= 0 && canBeEmpty; c = m_nodes[c].next) {
+            if (!FirstSet(c, bits, high, canBeEmpty)) return false;
+        }
+        return true;
+    case N_ALT:
+        for (c = nd.child; c >= 0; c = m_nodes[c].next) {
+            bool e;
+            if (!FirstSet(c, bits, high, e)) return false;
+            if (e) canBeEmpty = true;
+        }
+        return true;
+    case N_GROUP:
+    case N_ATOMIC:
+        return FirstSet(nd.child, bits, high, canBeEmpty);
+    case N_REPEAT:
+        if (nd.b == 0) {   /* never executed */
+            canBeEmpty = true;
+            return true;
+        }
+        if (!FirstSet(nd.child, bits, high, canBeEmpty)) return false;
+        if (nd.a == 0) canBeEmpty = true;
+        return true;
+    default:   /* N_ANY, N_BACKREF, N_CALL, N_COND, N_GRAPHEME */
+        return false;
+    }
+}
+
+/*
+ * The last literal character that every match of n must consume, or -1.  Only the parts every match
+ * goes through are looked at (no alternatives, optional parts or assertions), so the character lies at
+ * or after the position where the match attempt started.
+ */
+int Compiler::RequiredChar(int n) const
+{
+    const Node& nd = m_nodes[n];
+    int c, r = -1;
+    switch (nd.type) {
+    case N_CHAR:
+        if (nd.b && UcHasCaseVariants((Cp)nd.a)) return -1;
+        return nd.a;
+    case N_CAT:
+        for (c = nd.child; c >= 0; c = m_nodes[c].next) {
+            int t = RequiredChar(c);
+            if (t >= 0) r = t;
+        }
+        return r;
+    case N_GROUP:
+    case N_ATOMIC:
+        return RequiredChar(nd.child);
+    case N_REPEAT:
+        return nd.a >= 1 ? RequiredChar(nd.child) : -1;
     default:
         return -1;
     }
@@ -3100,14 +3226,18 @@ Matcher::Matcher(const Program& prog, Work& w, const wchar_t* s, int n, int gpos
     for (i = 0; i < m_stSize; ++i) w.st[i] = -1;
 }
 
-/* drop the choice points above mark (and the mark itself) but keep what is needed to undo state changes */
+/*
+ * drop the choice points above mark (and the mark itself) but keep what is needed to undo state changes.
+ * Verbs go too: as in PCRE2 and Perl, a verb inside an atomic group or a true assertion only acts
+ * while the backtracking is still inside it.
+ */
 void Matcher::CutTo(int mark)
 {
     Vec<BtEntry>& stk = m_w.stack;
     int w = mark, i, sz = stk.Size();
     for (i = mark + 1; i < sz; ++i) {
         int t = stk[i].type;
-        if (t == BT_UNDO || t == BT_POOL || t == BT_VERB) stk[w++] = stk[i];
+        if (t == BT_UNDO || t == BT_POOL) stk[w++] = stk[i];
     }
     stk.Resize(w);
 }
@@ -3316,6 +3446,7 @@ bool Matcher::Run(int startPos)
             if (n - pos < len) goto fail;
             if (code[pc] == OP_BACKREF) {
                 for (i = 0; i < len; ++i) if (s[bs + i] != s[pos + i]) goto fail;
+                if (IsMidPair(s, n, pos + len)) goto fail;   /* a lone high surrogate copied in front of a pair */
             } else {
                 for (i = 0; i < len; ) {   /* character by character: a surrogate pair is folded as one character */
                     int l1, l2;
@@ -3532,11 +3663,35 @@ bool Matcher::Run(int startPos)
                 pos = e.b;
                 stk.Pop();
                 goto resume;
-            case BT_GREEDY:   /* give back one character at a time */
+            case BT_GREEDY: {   /* give back one character at a time */
+                int q = e.c;
+                if (code[e.a] == OP_CHAR) {
+                    /* a literal follows: go straight to the places where it can match.  Every place skipped
+                       counts as the failure it saves, so the step limit is reached just as before. */
+                    const Cp u = (Cp)FirstUnit(code[e.a + 1]);
+                    unsigned long skipped = 0;
+                    while (q > e.b && (Cp)s[q] != u) {
+                        q -= PrevLen(s, q);
+                        ++skipped;
+                    }
+                    if ((Cp)s[q] != u) {
+                        ++skipped;
+                        stk.Pop();
+                    }
+                    if (skipped > 0) {
+                        unsigned long before = m_steps;
+                        m_steps += skipped;
+                        if (m_steps > m_limit || m_steps < before)
+                            throw CRegexpException(CRegexpException::ERR_STEP_LIMIT, -1, "backtrack limit exceeded");
+                        if (m_memoAt > before && m_memoAt <= m_steps) StartMemo();
+                    }
+                    if ((Cp)s[q] != u) continue;
+                }
                 pc = e.a;
-                pos = e.c;
-                if (e.c > e.b) e.c -= PrevLen(s, e.c); else stk.Pop();
+                pos = q;
+                if (q > e.b) e.c = q - PrevLen(s, q); else stk.Pop();
                 goto resume;
+            }
             case BT_LAZY: {
                 int rp = e.a;
                 int mx = code[rp + 3];
@@ -3590,15 +3745,36 @@ bool Matcher::Run(int startPos)
 bool Matcher::Search(int from)
 {
     int p = from;
-    if (m_exact) return Run(p);   /* only the search start is tried */
+    int req = -1;   /* where the next reqChar was found, -1: not looked for yet */
+    if (m_prog.reqChar >= 0) {   /* without that character there is no match anywhere */
+        req = from;
+        while (req < m_n && (Cp)m_s[req] != (Cp)m_prog.reqChar) ++req;
+        if (req >= m_n) return false;
+    }
+    if (m_exact || m_prog.anchored) return Run(p);   /* only the search start is tried */
     for (;;) {
         if (m_prog.firstChar >= 0) {
             while (p < m_n && (Cp)m_s[p] != (Cp)m_prog.firstChar) ++p;
             if (p >= m_n) return false;
+        } else if (m_prog.useStartSet) {   /* a match consumes at least one character, and it is one of these */
+            const unsigned int* set = m_prog.startSet;
+            const int high = m_prog.startHigh;
+            while (p < m_n) {
+                Cp u = (Cp)m_s[p];
+                if (u < 256 ? ((set[u >> 5] >> (u & 31)) & 1u) != 0 : high != 0) break;
+                ++p;
+            }
+            if (p >= m_n) return false;
+        }
+        if (req >= 0 && req < p && m_prog.firstChar < 0) {   /* the required character must still lie ahead
+                                                                (with a first literal, a second scan costs more than it saves) */
+            req = p;
+            while (req < m_n && (Cp)m_s[req] != (Cp)m_prog.reqChar) ++req;
+            if (req >= m_n) return false;
         }
         if (p == from || !IsMidPair(m_s, m_n, p)) {   /* a match never starts inside a surrogate pair */
             if (Run(p)) return true;
-            if (m_verb == VERB_COMMIT || m_prog.anchored) return false;
+            if (m_verb == VERB_COMMIT) return false;
         }
         if (m_verb == VERB_SKIP && m_verbPos > p) {
             p = m_verbPos;
@@ -6119,8 +6295,15 @@ bool CRegexpW::MatchImpl(const wchar_t* str, int len, CRegexpContext& ctx, int s
     }
     if (m_prog->notEmpty == 2 && notEmpty < 0) notEmpty = from;   /* (*NOTEMPTY_ATSTART) */
 
-    if (len > (int)((0xFFFFFFFFUL - m_stepBase) / (m_stepPer ? m_stepPer : 1UL))) limit = 0xFFFFFFFFUL;
-    else limit = m_stepBase + m_stepPer * (unsigned long)len;
+    {   /* base + perChar * len, saturated at 0xFFFFFFFF (all in unsigned long: the quotient need not fit an int) */
+        unsigned long room = (m_stepBase < 0xFFFFFFFFUL) ? 0xFFFFFFFFUL - m_stepBase : 0UL;
+        if (m_stepPer != 0 && (unsigned long)len > room / m_stepPer) {
+            limit = 0xFFFFFFFFUL;
+            if (m_stepBase > limit) limit = m_stepBase;
+        } else {
+            limit = m_stepBase + m_stepPer * (unsigned long)len;
+        }
+    }
     if (m_prog->limitMatch && m_prog->limitMatch < limit) limit = m_prog->limitMatch;   /* (*LIMIT_MATCH=n) */
 
     if (!ctx.m_work) {
